@@ -136,6 +136,14 @@ pub trait VMax<RHS = Self> {
     fn vmax(self, rhs: RHS) -> Self::Output;
 }
 
+pub trait VZero {
+    fn vzero() -> Self;
+}
+
+pub trait VOne {
+    fn vone() -> Self;
+}
+
 impl VAny for bool {
     type Output = bool;
 

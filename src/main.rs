@@ -3,6 +3,7 @@
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(maybe_uninit_uninit_array)]
 
+mod aabb;
 mod simd;
 mod vector;
 mod vops;

@@ -91,6 +91,12 @@ impl<T: Default, const N: usize> Default for Vector<T, N> {
     }
 }
 
+impl<T: Clone, const N: usize> From<T> for Vector<T, N> {
+    fn from(value: T) -> Self {
+        Self([(); N].map(|_| value.clone()))
+    }
+}
+
 impl<T, const N: usize> From<[T; N]> for Vector<T, N> {
     fn from(value: [T; N]) -> Self {
         Self(value)
@@ -145,6 +151,23 @@ impl<T, const N: usize> IndexMut<usize> for Vector<T, N> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         &mut self.0[index]
     }
+}
+
+macro_rules! impl_constants {
+    ($([$constant_trait:ident $constant_func:ident])*) => {
+        $(
+            impl<T: $constant_trait, const N: usize> $constant_trait for Vector<T, N> {
+                fn $constant_func() -> Self {
+                    Self([(); N].map(|_| T::$constant_func()))
+                }
+            }
+        )*
+    }
+}
+
+impl_constants! {
+    [VZero vzero]
+    [VOne vone]
 }
 
 macro_rules! impl_trivial_unops {
