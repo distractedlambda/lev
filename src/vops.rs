@@ -1,295 +1,1040 @@
-pub trait VAbs {
-    type Output;
+use std::ops::{
+    Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Div, DivAssign,
+    Mul, MulAssign, Neg, Not, Rem, RemAssign, Sub, SubAssign,
+};
 
-    fn vabs(self) -> Self::Output;
+pub trait VMask<T>:
+    Sized
+    + Not<Output = Self>
+    + BitAnd<Output = Self>
+    + BitOr<Output = Self>
+    + BitXor<Output = Self>
+    + BitAndAssign
+    + BitOrAssign
+    + BitXorAssign
+{
+    fn v_select(self, if_true: T, if_false: T) -> T;
 }
 
-pub trait VSqrt {
-    type Output;
+pub trait Vectorize: Sized {
+    type Scalar;
 
-    fn vsqrt(self) -> Self::Output;
+    type Mask: VMask<Self>;
 }
 
-pub trait VTrunc {
-    type Output;
-
-    fn vtrunc(self) -> Self::Output;
+pub trait VZero: Vectorize {
+    fn v_zero() -> Self;
 }
 
-pub trait VCls {
-    type Output;
-
-    fn vcls(self) -> Self::Output;
+pub trait VOne: Vectorize {
+    fn v_one() -> Self;
 }
 
-pub trait VClz {
-    type Output;
+pub trait VPartialEq: Vectorize {
+    fn v_eq(self, other: Self) -> Self::Mask;
 
-    fn vclz(self) -> Self::Output;
+    fn v_ne(self, other: Self) -> Self::Mask {
+        !self.v_eq(other)
+    }
 }
 
-pub trait VPopcount {
-    type Output;
+pub trait VEq: VPartialEq {}
 
-    fn vpopcount(self) -> Self::Output;
+pub trait VPartialOrd: VPartialEq {
+    fn v_lt(self, other: Self) -> Self::Mask;
+
+    fn v_le(self, other: Self) -> Self::Mask;
+
+    fn v_gt(self, other: Self) -> Self::Mask {
+        !self.v_le(other)
+    }
+
+    fn v_ge(self, other: Self) -> Self::Mask {
+        !self.v_lt(other)
+    }
+
+    fn v_min(self, other: Self) -> Self;
+
+    fn v_max(self, other: Self) -> Self;
+
+    fn v_clamp(self, min: Self, max: Self) -> Self {
+        self.v_max(min).v_min(max)
+    }
 }
 
-pub trait VEq<RHS = Self> {
-    type Output;
+pub trait VOrd: VPartialOrd + VEq {}
 
-    fn veq(self, rhs: RHS) -> Self::Output;
+pub trait VNum:
+    VZero
+    + VOne
+    + VPartialOrd
+    + Add<Output = Self>
+    + Sub<Output = Self>
+    + Mul<Output = Self>
+    + Div<Output = Self>
+    + Rem<Output = Self>
+    + AddAssign
+    + SubAssign
+    + MulAssign
+    + DivAssign
+    + RemAssign
+{
 }
 
-pub trait VNe<RHS = Self> {
-    type Output;
+pub trait VSigned: VNum + Neg<Output = Self> {}
 
-    fn vne(self, rhs: RHS) -> Self::Output;
+pub trait VInt:
+    VNum
+    + BitAnd<Output = Self>
+    + BitOr<Output = Self>
+    + BitXor<Output = Self>
+    + BitAndAssign
+    + BitOrAssign
+    + BitXorAssign
+{
 }
 
-pub trait VLt<RHS = Self> {
-    type Output;
+pub trait VSignedInt: VSigned + VInt {}
 
-    fn vlt(self, rhs: RHS) -> Self::Output;
+pub trait VFloat: VSigned {}
+
+impl<T> VMask<T> for bool {
+    #[inline]
+    fn v_select(self, if_true: T, if_false: T) -> T {
+        if self {
+            if_true
+        } else {
+            if_false
+        }
+    }
 }
 
-pub trait VGt<RHS = Self> {
-    type Output;
+impl Vectorize for u8 {
+    type Scalar = u8;
 
-    fn vgt(self, rhs: RHS) -> Self::Output;
+    type Mask = bool;
 }
 
-pub trait VLe<RHS = Self> {
-    type Output;
+impl Vectorize for u16 {
+    type Scalar = u16;
 
-    fn vle(self, rhs: RHS) -> Self::Output;
+    type Mask = bool;
 }
 
-pub trait VGe<RHS = Self> {
-    type Output;
+impl Vectorize for u32 {
+    type Scalar = u32;
 
-    fn vge(self, rhs: RHS) -> Self::Output;
+    type Mask = bool;
 }
 
-pub trait VFloor {
-    type Output;
+impl Vectorize for u64 {
+    type Scalar = u64;
 
-    fn vfloor(self) -> Self::Output;
+    type Mask = bool;
 }
 
-pub trait VCeil {
-    type Output;
+impl Vectorize for usize {
+    type Scalar = usize;
 
-    fn vceil(self) -> Self::Output;
+    type Mask = bool;
 }
 
-pub trait VRound {
-    type Output;
+impl Vectorize for i8 {
+    type Scalar = i8;
 
-    fn vround(self) -> Self::Output;
+    type Mask = bool;
 }
 
-pub trait VSum {
-    type Output;
+impl Vectorize for i16 {
+    type Scalar = i16;
 
-    fn vsum(self) -> Self::Output;
+    type Mask = bool;
 }
 
-pub trait VProduct {
-    type Output;
+impl Vectorize for i32 {
+    type Scalar = i32;
 
-    fn vproduct(self) -> Self::Output;
+    type Mask = bool;
 }
 
-pub trait VAny {
-    type Output;
+impl Vectorize for i64 {
+    type Scalar = i64;
 
-    fn vany(self) -> Self::Output;
+    type Mask = bool;
 }
 
-pub trait VAll {
-    type Output;
+impl Vectorize for isize {
+    type Scalar = isize;
 
-    fn vall(self) -> Self::Output;
+    type Mask = bool;
 }
 
-pub trait VMinimum {
-    type Output;
+impl Vectorize for f32 {
+    type Scalar = f32;
 
-    fn vminimum(self) -> Self::Output;
+    type Mask = bool;
 }
 
-pub trait VMaximum {
-    type Output;
+impl Vectorize for f64 {
+    type Scalar = f64;
 
-    fn vmaximum(self) -> Self::Output;
+    type Mask = bool;
 }
 
-pub trait VMin<RHS = Self> {
-    type Output;
-
-    fn vmin(self, rhs: RHS) -> Self::Output;
+impl VZero for u8 {
+    #[inline]
+    fn v_zero() -> Self {
+        0
+    }
 }
 
-pub trait VMax<RHS = Self> {
-    type Output;
-
-    fn vmax(self, rhs: RHS) -> Self::Output;
+impl VZero for u16 {
+    #[inline]
+    fn v_zero() -> Self {
+        0
+    }
 }
 
-pub trait VZero {
-    fn vzero() -> Self;
+impl VZero for u32 {
+    #[inline]
+    fn v_zero() -> Self {
+        0
+    }
 }
 
-pub trait VOne {
-    fn vone() -> Self;
+impl VZero for u64 {
+    #[inline]
+    fn v_zero() -> Self {
+        0
+    }
 }
 
-impl VAny for bool {
-    type Output = bool;
+impl VZero for usize {
+    #[inline]
+    fn v_zero() -> Self {
+        0
+    }
+}
+
+impl VZero for i8 {
+    #[inline]
+    fn v_zero() -> Self {
+        0
+    }
+}
+
+impl VZero for i16 {
+    #[inline]
+    fn v_zero() -> Self {
+        0
+    }
+}
+
+impl VZero for i32 {
+    #[inline]
+    fn v_zero() -> Self {
+        0
+    }
+}
+
+impl VZero for i64 {
+    #[inline]
+    fn v_zero() -> Self {
+        0
+    }
+}
+
+impl VZero for isize {
+    #[inline]
+    fn v_zero() -> Self {
+        0
+    }
+}
+
+impl VZero for f32 {
+    #[inline]
+    fn v_zero() -> Self {
+        0.0
+    }
+}
+
+impl VZero for f64 {
+    #[inline]
+    fn v_zero() -> Self {
+        0.0
+    }
+}
+
+impl VOne for u8 {
+    #[inline]
+    fn v_one() -> Self {
+        1
+    }
+}
+
+impl VOne for u16 {
+    #[inline]
+    fn v_one() -> Self {
+        1
+    }
+}
+
+impl VOne for u32 {
+    #[inline]
+    fn v_one() -> Self {
+        1
+    }
+}
+
+impl VOne for u64 {
+    #[inline]
+    fn v_one() -> Self {
+        1
+    }
+}
+
+impl VOne for usize {
+    #[inline]
+    fn v_one() -> Self {
+        1
+    }
+}
+
+impl VOne for i8 {
+    #[inline]
+    fn v_one() -> Self {
+        1
+    }
+}
+
+impl VOne for i16 {
+    #[inline]
+    fn v_one() -> Self {
+        1
+    }
+}
+
+impl VOne for i32 {
+    #[inline]
+    fn v_one() -> Self {
+        1
+    }
+}
+
+impl VOne for i64 {
+    #[inline]
+    fn v_one() -> Self {
+        1
+    }
+}
+
+impl VOne for isize {
+    #[inline]
+    fn v_one() -> Self {
+        1
+    }
+}
+
+impl VOne for f32 {
+    #[inline]
+    fn v_one() -> Self {
+        1.0
+    }
+}
+
+impl VOne for f64 {
+    #[inline]
+    fn v_one() -> Self {
+        1.0
+    }
+}
+
+impl VPartialEq for u8 {
+    #[inline]
+    fn v_eq(self, other: Self) -> Self::Mask {
+        self == other
+    }
 
     #[inline]
-    fn vany(self) -> Self::Output {
-        self
+    fn v_ne(self, other: Self) -> Self::Mask {
+        self != other
     }
 }
 
-impl VAll for bool {
-    type Output = bool;
+impl VPartialEq for u16 {
+    #[inline]
+    fn v_eq(self, other: Self) -> Self::Mask {
+        self == other
+    }
 
     #[inline]
-    fn vall(self) -> Self::Output {
-        self
+    fn v_ne(self, other: Self) -> Self::Mask {
+        self != other
     }
 }
 
-macro_rules! impl_common_ops {
-    ($($typ:ty),* $(,)?) => {
-        $(
-            impl VSum for $typ {
-                type Output = Self;
+impl VPartialEq for u32 {
+    #[inline]
+    fn v_eq(self, other: Self) -> Self::Mask {
+        self == other
+    }
 
-                #[inline]
-                fn vsum(self) -> Self::Output {
-                    self
-                }
-            }
-
-            impl VProduct for $typ {
-                type Output = Self;
-
-                #[inline]
-                fn vproduct(self) -> Self::Output {
-                    self
-                }
-            }
-
-            impl VMinimum for $typ {
-                type Output = Self;
-
-                #[inline]
-                fn vminimum(self) -> Self::Output {
-                    self
-                }
-            }
-
-            impl VMaximum for $typ {
-                type Output = Self;
-
-                #[inline]
-                fn vmaximum(self) -> Self::Output {
-                    self
-                }
-            }
-
-            impl VMin for $typ {
-                type Output = Self;
-
-                #[inline]
-                fn vmin(self, rhs: Self) -> Self::Output {
-                    self.min(rhs)
-                }
-            }
-
-            impl VMax for $typ {
-                type Output = Self;
-
-                #[inline]
-                fn vmax(self, rhs: Self) -> Self::Output {
-                    self.max(rhs)
-                }
-            }
-        )*
+    #[inline]
+    fn v_ne(self, other: Self) -> Self::Mask {
+        self != other
     }
 }
 
-impl_common_ops!(u8, u16, u32, u64, usize, i8, i16, i32, i64, isize, f32, f64);
+impl VPartialEq for u64 {
+    #[inline]
+    fn v_eq(self, other: Self) -> Self::Mask {
+        self == other
+    }
 
-macro_rules! impl_signed_ops {
-    ($($typ:ty),* $(,)?) => {
-        $(
-            impl VAbs for $typ {
-                type Output = Self;
-
-                #[inline]
-                fn vabs(self) -> Self::Output {
-                    self.abs()
-                }
-            }
-        )*
+    #[inline]
+    fn v_ne(self, other: Self) -> Self::Mask {
+        self != other
     }
 }
 
-impl_signed_ops!(i8, i16, i32, i64, isize, f32, f64);
+impl VPartialEq for usize {
+    #[inline]
+    fn v_eq(self, other: Self) -> Self::Mask {
+        self == other
+    }
 
-macro_rules! impl_fp_ops {
-    ($($typ:ty),* $(,)?) => {
-        $(
-            impl VSqrt for $typ {
-                type Output = Self;
-
-                #[inline]
-                fn vsqrt(self) -> Self::Output {
-                    self.sqrt()
-                }
-            }
-
-            impl VTrunc for $typ {
-                type Output = Self;
-
-                #[inline]
-                fn vtrunc(self) -> Self::Output {
-                    self.trunc()
-                }
-            }
-
-            impl VFloor for $typ {
-                type Output = Self;
-
-                #[inline]
-                fn vfloor(self) -> Self::Output {
-                    self.floor()
-                }
-            }
-
-            impl VCeil for $typ {
-                type Output = Self;
-
-                #[inline]
-                fn vceil(self) -> Self::Output {
-                    self.ceil()
-                }
-            }
-
-            impl VRound for $typ {
-                type Output = Self;
-
-                #[inline]
-                fn vround(self) -> Self::Output {
-                    self.round()
-                }
-            }
-        )*
+    #[inline]
+    fn v_ne(self, other: Self) -> Self::Mask {
+        self != other
     }
 }
 
-impl_fp_ops!(f32, f64);
+impl VPartialEq for i8 {
+    #[inline]
+    fn v_eq(self, other: Self) -> Self::Mask {
+        self == other
+    }
+
+    #[inline]
+    fn v_ne(self, other: Self) -> Self::Mask {
+        self != other
+    }
+}
+
+impl VPartialEq for i16 {
+    #[inline]
+    fn v_eq(self, other: Self) -> Self::Mask {
+        self == other
+    }
+
+    #[inline]
+    fn v_ne(self, other: Self) -> Self::Mask {
+        self != other
+    }
+}
+
+impl VPartialEq for i32 {
+    #[inline]
+    fn v_eq(self, other: Self) -> Self::Mask {
+        self == other
+    }
+
+    #[inline]
+    fn v_ne(self, other: Self) -> Self::Mask {
+        self != other
+    }
+}
+
+impl VPartialEq for i64 {
+    #[inline]
+    fn v_eq(self, other: Self) -> Self::Mask {
+        self == other
+    }
+
+    #[inline]
+    fn v_ne(self, other: Self) -> Self::Mask {
+        self != other
+    }
+}
+
+impl VPartialEq for isize {
+    #[inline]
+    fn v_eq(self, other: Self) -> Self::Mask {
+        self == other
+    }
+
+    #[inline]
+    fn v_ne(self, other: Self) -> Self::Mask {
+        self != other
+    }
+}
+
+impl VPartialEq for f32 {
+    #[inline]
+    fn v_eq(self, other: Self) -> Self::Mask {
+        self == other
+    }
+
+    #[inline]
+    fn v_ne(self, other: Self) -> Self::Mask {
+        self != other
+    }
+}
+
+impl VPartialEq for f64 {
+    #[inline]
+    fn v_eq(self, other: Self) -> Self::Mask {
+        self == other
+    }
+
+    #[inline]
+    fn v_ne(self, other: Self) -> Self::Mask {
+        self != other
+    }
+}
+
+impl VEq for u8 {}
+
+impl VEq for u16 {}
+
+impl VEq for u32 {}
+
+impl VEq for u64 {}
+
+impl VEq for usize {}
+
+impl VEq for i8 {}
+
+impl VEq for i16 {}
+
+impl VEq for i32 {}
+
+impl VEq for i64 {}
+
+impl VEq for isize {}
+
+impl VPartialOrd for u8 {
+    #[inline]
+    fn v_lt(self, other: Self) -> Self::Mask {
+        self < other
+    }
+
+    #[inline]
+    fn v_le(self, other: Self) -> Self::Mask {
+        self <= other
+    }
+
+    #[inline]
+    fn v_gt(self, other: Self) -> Self::Mask {
+        self > other
+    }
+
+    #[inline]
+    fn v_ge(self, other: Self) -> Self::Mask {
+        self >= other
+    }
+
+    #[inline]
+    fn v_min(self, other: Self) -> Self {
+        self.min(other)
+    }
+
+    #[inline]
+    fn v_max(self, other: Self) -> Self {
+        self.max(other)
+    }
+
+    #[inline]
+    fn v_clamp(self, min: Self, max: Self) -> Self {
+        self.clamp(min, max)
+    }
+}
+
+impl VPartialOrd for u16 {
+    #[inline]
+    fn v_lt(self, other: Self) -> Self::Mask {
+        self < other
+    }
+
+    #[inline]
+    fn v_le(self, other: Self) -> Self::Mask {
+        self <= other
+    }
+
+    #[inline]
+    fn v_gt(self, other: Self) -> Self::Mask {
+        self > other
+    }
+
+    #[inline]
+    fn v_ge(self, other: Self) -> Self::Mask {
+        self >= other
+    }
+
+    #[inline]
+    fn v_min(self, other: Self) -> Self {
+        self.min(other)
+    }
+
+    #[inline]
+    fn v_max(self, other: Self) -> Self {
+        self.max(other)
+    }
+
+    #[inline]
+    fn v_clamp(self, min: Self, max: Self) -> Self {
+        self.clamp(min, max)
+    }
+}
+
+impl VPartialOrd for u32 {
+    #[inline]
+    fn v_lt(self, other: Self) -> Self::Mask {
+        self < other
+    }
+
+    #[inline]
+    fn v_le(self, other: Self) -> Self::Mask {
+        self <= other
+    }
+
+    #[inline]
+    fn v_gt(self, other: Self) -> Self::Mask {
+        self > other
+    }
+
+    #[inline]
+    fn v_ge(self, other: Self) -> Self::Mask {
+        self >= other
+    }
+
+    #[inline]
+    fn v_min(self, other: Self) -> Self {
+        self.min(other)
+    }
+
+    #[inline]
+    fn v_max(self, other: Self) -> Self {
+        self.max(other)
+    }
+
+    #[inline]
+    fn v_clamp(self, min: Self, max: Self) -> Self {
+        self.clamp(min, max)
+    }
+}
+
+impl VPartialOrd for u64 {
+    #[inline]
+    fn v_lt(self, other: Self) -> Self::Mask {
+        self < other
+    }
+
+    #[inline]
+    fn v_le(self, other: Self) -> Self::Mask {
+        self <= other
+    }
+
+    #[inline]
+    fn v_gt(self, other: Self) -> Self::Mask {
+        self > other
+    }
+
+    #[inline]
+    fn v_ge(self, other: Self) -> Self::Mask {
+        self >= other
+    }
+
+    #[inline]
+    fn v_min(self, other: Self) -> Self {
+        self.min(other)
+    }
+
+    #[inline]
+    fn v_max(self, other: Self) -> Self {
+        self.max(other)
+    }
+
+    #[inline]
+    fn v_clamp(self, min: Self, max: Self) -> Self {
+        self.clamp(min, max)
+    }
+}
+
+impl VPartialOrd for usize {
+    #[inline]
+    fn v_lt(self, other: Self) -> Self::Mask {
+        self < other
+    }
+
+    #[inline]
+    fn v_le(self, other: Self) -> Self::Mask {
+        self <= other
+    }
+
+    #[inline]
+    fn v_gt(self, other: Self) -> Self::Mask {
+        self > other
+    }
+
+    #[inline]
+    fn v_ge(self, other: Self) -> Self::Mask {
+        self >= other
+    }
+
+    #[inline]
+    fn v_min(self, other: Self) -> Self {
+        self.min(other)
+    }
+
+    #[inline]
+    fn v_max(self, other: Self) -> Self {
+        self.max(other)
+    }
+
+    #[inline]
+    fn v_clamp(self, min: Self, max: Self) -> Self {
+        self.clamp(min, max)
+    }
+}
+
+impl VPartialOrd for i8 {
+    #[inline]
+    fn v_lt(self, other: Self) -> Self::Mask {
+        self < other
+    }
+
+    #[inline]
+    fn v_le(self, other: Self) -> Self::Mask {
+        self <= other
+    }
+
+    #[inline]
+    fn v_gt(self, other: Self) -> Self::Mask {
+        self > other
+    }
+
+    #[inline]
+    fn v_ge(self, other: Self) -> Self::Mask {
+        self >= other
+    }
+
+    #[inline]
+    fn v_min(self, other: Self) -> Self {
+        self.min(other)
+    }
+
+    #[inline]
+    fn v_max(self, other: Self) -> Self {
+        self.max(other)
+    }
+
+    #[inline]
+    fn v_clamp(self, min: Self, max: Self) -> Self {
+        self.clamp(min, max)
+    }
+}
+
+impl VPartialOrd for i16 {
+    #[inline]
+    fn v_lt(self, other: Self) -> Self::Mask {
+        self < other
+    }
+
+    #[inline]
+    fn v_le(self, other: Self) -> Self::Mask {
+        self <= other
+    }
+
+    #[inline]
+    fn v_gt(self, other: Self) -> Self::Mask {
+        self > other
+    }
+
+    #[inline]
+    fn v_ge(self, other: Self) -> Self::Mask {
+        self >= other
+    }
+
+    #[inline]
+    fn v_min(self, other: Self) -> Self {
+        self.min(other)
+    }
+
+    #[inline]
+    fn v_max(self, other: Self) -> Self {
+        self.max(other)
+    }
+
+    #[inline]
+    fn v_clamp(self, min: Self, max: Self) -> Self {
+        self.clamp(min, max)
+    }
+}
+
+impl VPartialOrd for i32 {
+    #[inline]
+    fn v_lt(self, other: Self) -> Self::Mask {
+        self < other
+    }
+
+    #[inline]
+    fn v_le(self, other: Self) -> Self::Mask {
+        self <= other
+    }
+
+    #[inline]
+    fn v_gt(self, other: Self) -> Self::Mask {
+        self > other
+    }
+
+    #[inline]
+    fn v_ge(self, other: Self) -> Self::Mask {
+        self >= other
+    }
+
+    #[inline]
+    fn v_min(self, other: Self) -> Self {
+        self.min(other)
+    }
+
+    #[inline]
+    fn v_max(self, other: Self) -> Self {
+        self.max(other)
+    }
+
+    #[inline]
+    fn v_clamp(self, min: Self, max: Self) -> Self {
+        self.clamp(min, max)
+    }
+}
+
+impl VPartialOrd for i64 {
+    #[inline]
+    fn v_lt(self, other: Self) -> Self::Mask {
+        self < other
+    }
+
+    #[inline]
+    fn v_le(self, other: Self) -> Self::Mask {
+        self <= other
+    }
+
+    #[inline]
+    fn v_gt(self, other: Self) -> Self::Mask {
+        self > other
+    }
+
+    #[inline]
+    fn v_ge(self, other: Self) -> Self::Mask {
+        self >= other
+    }
+
+    #[inline]
+    fn v_min(self, other: Self) -> Self {
+        self.min(other)
+    }
+
+    #[inline]
+    fn v_max(self, other: Self) -> Self {
+        self.max(other)
+    }
+
+    #[inline]
+    fn v_clamp(self, min: Self, max: Self) -> Self {
+        self.clamp(min, max)
+    }
+}
+
+impl VPartialOrd for isize {
+    #[inline]
+    fn v_lt(self, other: Self) -> Self::Mask {
+        self < other
+    }
+
+    #[inline]
+    fn v_le(self, other: Self) -> Self::Mask {
+        self <= other
+    }
+
+    #[inline]
+    fn v_gt(self, other: Self) -> Self::Mask {
+        self > other
+    }
+
+    #[inline]
+    fn v_ge(self, other: Self) -> Self::Mask {
+        self >= other
+    }
+
+    #[inline]
+    fn v_min(self, other: Self) -> Self {
+        self.min(other)
+    }
+
+    #[inline]
+    fn v_max(self, other: Self) -> Self {
+        self.max(other)
+    }
+
+    #[inline]
+    fn v_clamp(self, min: Self, max: Self) -> Self {
+        self.clamp(min, max)
+    }
+}
+
+impl VPartialOrd for f32 {
+    #[inline]
+    fn v_lt(self, other: Self) -> Self::Mask {
+        self < other
+    }
+
+    #[inline]
+    fn v_le(self, other: Self) -> Self::Mask {
+        self <= other
+    }
+
+    #[inline]
+    fn v_gt(self, other: Self) -> Self::Mask {
+        self > other
+    }
+
+    #[inline]
+    fn v_ge(self, other: Self) -> Self::Mask {
+        self >= other
+    }
+
+    #[inline]
+    fn v_min(self, other: Self) -> Self {
+        self.min(other)
+    }
+
+    #[inline]
+    fn v_max(self, other: Self) -> Self {
+        self.max(other)
+    }
+}
+
+impl VPartialOrd for f64 {
+    #[inline]
+    fn v_lt(self, other: Self) -> Self::Mask {
+        self < other
+    }
+
+    #[inline]
+    fn v_le(self, other: Self) -> Self::Mask {
+        self <= other
+    }
+
+    #[inline]
+    fn v_gt(self, other: Self) -> Self::Mask {
+        self > other
+    }
+
+    #[inline]
+    fn v_ge(self, other: Self) -> Self::Mask {
+        self >= other
+    }
+
+    #[inline]
+    fn v_min(self, other: Self) -> Self {
+        self.min(other)
+    }
+
+    #[inline]
+    fn v_max(self, other: Self) -> Self {
+        self.max(other)
+    }
+}
+
+impl VOrd for u8 {}
+
+impl VOrd for u16 {}
+
+impl VOrd for u32 {}
+
+impl VOrd for u64 {}
+
+impl VOrd for usize {}
+
+impl VOrd for i8 {}
+
+impl VOrd for i16 {}
+
+impl VOrd for i32 {}
+
+impl VOrd for i64 {}
+
+impl VOrd for isize {}
+
+impl VNum for u8 {}
+
+impl VNum for u16 {}
+
+impl VNum for u32 {}
+
+impl VNum for u64 {}
+
+impl VNum for usize {}
+
+impl VNum for i8 {}
+
+impl VNum for i16 {}
+
+impl VNum for i32 {}
+
+impl VNum for i64 {}
+
+impl VNum for isize {}
+
+impl VNum for f32 {}
+
+impl VNum for f64 {}
+
+impl VSigned for i8 {}
+
+impl VSigned for i16 {}
+
+impl VSigned for i32 {}
+
+impl VSigned for i64 {}
+
+impl VSigned for isize {}
+
+impl VSigned for f32 {}
+
+impl VSigned for f64 {}
+
+impl VInt for u8 {}
+
+impl VInt for u16 {}
+
+impl VInt for u32 {}
+
+impl VInt for u64 {}
+
+impl VInt for usize {}
+
+impl VInt for i8 {}
+
+impl VInt for i16 {}
+
+impl VInt for i32 {}
+
+impl VInt for i64 {}
+
+impl VInt for isize {}
+
+impl VSignedInt for i8 {}
+
+impl VSignedInt for i16 {}
+
+impl VSignedInt for i32 {}
+
+impl VSignedInt for i64 {}
+
+impl VSignedInt for isize {}
+
+impl VFloat for f32 {}
+
+impl VFloat for f64 {}

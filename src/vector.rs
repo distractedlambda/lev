@@ -60,29 +60,29 @@ impl<T, const N: usize> Vector<T, N> {
             .for_each(|(t, u)| f(t, u))
     }
 
-    pub fn dot<U>(self, other: Vector<U, N>) -> T::Output
-    where
-        T: Mul<U>,
-        T::Output: Add<Output = T::Output>,
-    {
-        (self * other).vsum()
-    }
+    // pub fn dot<U>(self, other: Vector<U, N>) -> T::Output
+    // where
+    //     T: Mul<U>,
+    //     T::Output: Add<Output = T::Output>,
+    // {
+    //     (self * other).vsum()
+    // }
 
-    pub fn norm_squared(self) -> T::Output
-    where
-        T: Clone + Mul,
-        T::Output: Add<Output = T::Output>,
-    {
-        self.clone().dot(self)
-    }
+    // pub fn norm_squared(self) -> T::Output
+    // where
+    //     T: Clone + Mul,
+    //     T::Output: Add<Output = T::Output>,
+    // {
+    //     self.clone().dot(self)
+    // }
 
-    pub fn norm(self) -> <T::Output as VSqrt>::Output
-    where
-        T: Clone + Mul,
-        T::Output: Add<Output = T::Output> + VSqrt,
-    {
-        self.norm_squared().vsqrt()
-    }
+    // pub fn norm(self) -> <T::Output as VSqrt>::Output
+    // where
+    //     T: Clone + Mul,
+    //     T::Output: Add<Output = T::Output> + VSqrt,
+    // {
+    //     self.norm_squared().vsqrt()
+    // }
 }
 
 impl<T: Default, const N: usize> Default for Vector<T, N> {
@@ -165,11 +165,6 @@ macro_rules! impl_constants {
     }
 }
 
-impl_constants! {
-    [VZero vzero]
-    [VOne vone]
-}
-
 macro_rules! impl_trivial_unops {
     ($([$op_trait:ident $op_func:ident])*) => {
         $(
@@ -184,20 +179,6 @@ macro_rules! impl_trivial_unops {
     }
 }
 
-impl_trivial_unops! {
-    [Neg neg]
-    [Not not]
-    [VAbs vabs]
-    [VCeil vceil]
-    [VCls vcls]
-    [VClz vclz]
-    [VFloor vfloor]
-    [VPopcount vpopcount]
-    [VRound vround]
-    [VSqrt vsqrt]
-    [VTrunc vtrunc]
-}
-
 macro_rules! impl_trivial_binops {
     ($([$op_trait:ident $op_func:ident])*) => {
         $(
@@ -210,27 +191,6 @@ macro_rules! impl_trivial_binops {
             }
         )*
     }
-}
-
-impl_trivial_binops! {
-    [Add add]
-    [BitAnd bitand]
-    [BitOr bitor]
-    [BitXor bitxor]
-    [Div div]
-    [Mul mul]
-    [Rem rem]
-    [Shl shl]
-    [Shr shr]
-    [Sub sub]
-    [VEq veq]
-    [VGe vge]
-    [VGt vgt]
-    [VLe vle]
-    [VLt vlt]
-    [VMax vmax]
-    [VMin vmin]
-    [VNe vne]
 }
 
 macro_rules! impl_trivial_assignops {
@@ -256,27 +216,4 @@ impl_trivial_assignops! {
     [BitXorAssign bitxor_assign]
     [ShlAssign shl_assign]
     [ShrAssign shr_assign]
-}
-
-macro_rules! impl_trivial_reduceops {
-    ($([$reduce_trait:ident $reduce_func:ident $binop_trait:ident $binop_func:ident])*) => {
-        $(
-            impl<T: $binop_trait<Output = T>, const N: usize> $reduce_trait for Vector<T, N> {
-                type Output = T;
-
-                fn $reduce_func(self) -> Self::Output {
-                    self.0.into_iter().reduce(T::$binop_func).unwrap()
-                }
-            }
-        )*
-    }
-}
-
-impl_trivial_reduceops! {
-    [VAll vall BitAnd bitand]
-    [VAny vany BitOr bitor]
-    [VMaximum vmaximum VMax vmax]
-    [VMinimum vminimum VMin vmin]
-    [VProduct vproduct Mul mul]
-    [VSum vsum Add add]
 }
