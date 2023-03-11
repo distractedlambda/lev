@@ -6,7 +6,6 @@
 mod aabb;
 mod simd;
 mod vector;
-mod vops;
 
 fn main() {
     println!("Hello, world!");

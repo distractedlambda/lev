@@ -7,8 +7,6 @@ use std::{
     },
 };
 
-use crate::vops::*;
-
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Vector<T, const N: usize>([T; N]);
@@ -162,7 +160,7 @@ macro_rules! impl_constants {
                 }
             }
         )*
-    }
+    };
 }
 
 macro_rules! impl_trivial_unops {
@@ -176,7 +174,7 @@ macro_rules! impl_trivial_unops {
                 }
             }
         )*
-    }
+    };
 }
 
 macro_rules! impl_trivial_binops {
@@ -190,7 +188,7 @@ macro_rules! impl_trivial_binops {
                 }
             }
         )*
-    }
+    };
 }
 
 macro_rules! impl_trivial_assignops {
@@ -202,7 +200,7 @@ macro_rules! impl_trivial_assignops {
                 }
             }
         )*
-    }
+    };
 }
 
 impl_trivial_assignops! {
