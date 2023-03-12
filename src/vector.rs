@@ -3,7 +3,7 @@ use std::{
     ops::{Add, Index, IndexMut, Mul},
 };
 
-use crate::vectorize::{VMask, VSelect, VSum, Vectorize, VSqrt};
+use crate::vectorize::{VEq, VLeast, VMask, VOrd, VSelect, VSqrt, VSum, Vectorize, VGreatest, VFloor, VCeil, VTrunc};
 
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -51,6 +51,15 @@ impl<T, const N: usize> Vector<T, N> {
         self.zip(other).map(|(t, u)| f(t, u))
     }
 
+    pub fn map3<U, V, W>(
+        self,
+        other1: Vector<U, N>,
+        other2: Vector<V, N>,
+        mut f: impl FnMut(T, U, V) -> W,
+    ) -> Vector<W, N> {
+        self.map2(other1.zip(other2), |a, (b, c)| f(a, b, c))
+    }
+
     #[inline]
     pub fn update(&mut self, f: impl FnMut(&mut T)) {
         self.0.iter_mut().for_each(f)
@@ -74,7 +83,7 @@ impl<T, const N: usize> Vector<T, N> {
     pub fn dot<U>(self, other: Vector<U, N>) -> T::Output
     where
         T: Mul<U>,
-        T::Output: Vectorize + Add<Output = T::Output>,
+        T::Output: Add<Output = T::Output> + Vectorize,
     {
         (self * other).v_sum()
     }
@@ -83,7 +92,7 @@ impl<T, const N: usize> Vector<T, N> {
     pub fn norm_squared(self) -> T::Output
     where
         T: Clone + Mul,
-        T::Output: Vectorize + Add<Output = T::Output>,
+        T::Output: Add<Output = T::Output> + Vectorize,
     {
         self.clone().dot(self)
     }
@@ -125,13 +134,98 @@ impl<T: VMask, const N: usize> VMask for Vector<T, N> {
 impl<T: VSelect<U>, U, const N: usize> VSelect<Vector<U, N>> for Vector<T, N> {
     #[inline]
     fn v_select(self, if_true: Vector<U, N>, if_false: Vector<U, N>) -> Vector<U, N> {
-        self.map2(if_true.zip(if_false), |c, (t, f)| c.v_select(t, f))
+        self.map3(if_true, if_false, T::v_select)
+    }
+}
+
+impl<T: VEq, const N: usize> VEq for Vector<T, N> {
+    #[inline]
+    fn v_eq(self, other: Self) -> Self::Mask {
+        self.map2(other, T::v_eq)
+    }
+
+    #[inline]
+    fn v_ne(self, other: Self) -> Self::Mask {
+        self.map2(other, T::v_ne)
+    }
+}
+
+impl<T: VOrd, const N: usize> VOrd for Vector<T, N> {
+    #[inline]
+    fn v_lt(self, other: Self) -> Self::Mask {
+        self.map2(other, T::v_lt)
+    }
+
+    #[inline]
+    fn v_le(self, other: Self) -> Self::Mask {
+        self.map2(other, T::v_le)
+    }
+
+    #[inline]
+    fn v_gt(self, other: Self) -> Self::Mask {
+        self.map2(other, T::v_gt)
+    }
+
+    #[inline]
+    fn v_ge(self, other: Self) -> Self::Mask {
+        self.map2(other, T::v_ge)
+    }
+
+    #[inline]
+    fn v_min(self, other: Self) -> Self {
+        self.map2(other, T::v_min)
+    }
+
+    #[inline]
+    fn v_max(self, other: Self) -> Self {
+        self.map2(other, T::v_max)
+    }
+
+    #[inline]
+    fn v_clamp(self, min: Self, max: Self) -> Self {
+        self.map3(min, max, T::v_clamp)
+    }
+}
+
+impl<T: VOrd, const N: usize> VLeast for Vector<T, N> {
+    #[inline]
+    fn v_least(self) -> Self::Lane {
+        self.reduce(T::v_min)
+    }
+}
+
+impl<T: VOrd, const N: usize> VGreatest for Vector<T, N> {
+    #[inline]
+    fn v_greatest(self) -> Self::Lane {
+        self.reduce(T::v_max)
     }
 }
 
 impl<T: Vectorize + Add<Output = T>, const N: usize> VSum for Vector<T, N> {
+    #[inline]
     fn v_sum(self) -> T {
         self.reduce(T::add)
+    }
+}
+
+impl<T: VFloor, const N: usize> VFloor for Vector<T, N> {
+    #[inline]
+    fn v_floor(self) -> Self {
+        self.map(T::v_floor)
+    }
+}
+
+impl<T: VCeil, const N: usize> VCeil for Vector<T, N> {
+    #[inline]
+    fn v_ceil(self) -> Self {
+        self.map(T::v_ceil)
+    }
+}
+
+impl<T: VTrunc, const N: usize> VTrunc for Vector<T, N> {
+    #[inline]
+    fn v_trunc(self) -> Self {
+        self.map(T::v_trunc)
     }
 }
 

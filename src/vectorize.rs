@@ -84,11 +84,11 @@ pub trait VSum<Output = <Self as Vectorize>::Lane>: Vectorize {
     fn v_sum(self) -> Output;
 }
 
-pub trait VLeast: Vectorize {
+pub trait VLeast: VOrd {
     fn v_least(self) -> Self::Lane;
 }
 
-pub trait VGreatest: Vectorize {
+pub trait VGreatest: VOrd {
     fn v_greatest(self) -> Self::Lane;
 }
 
