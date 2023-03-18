@@ -3,7 +3,10 @@ use std::{
     ops::{Add, Index, IndexMut, Mul},
 };
 
-use crate::vectorize::{VEq, VLeast, VMask, VOrd, VSelect, VSqrt, VSum, Vectorize, VGreatest, VFloor, VCeil, VTrunc};
+use crate::vectorize::{
+    VCeil, VEq, VFloor, VGreatest, VLeast, VMask, VOrd, VProduct, VSelect, VSqrt, VSum, VTrunc,
+    Vectorize,
+};
 
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -113,6 +116,16 @@ impl<T: Vectorize, const N: usize> Vectorize for Vector<T, N> {
     type Mask = Vector<T::Mask, N>;
 
     const LANES: usize = N;
+
+    #[inline]
+    fn v_zero() -> Self {
+        T::v_zero().into()
+    }
+
+    #[inline]
+    fn v_one() -> Self {
+        T::v_one().into()
+    }
 }
 
 impl<T: VMask, const N: usize> VMask for Vector<T, N> {
@@ -148,6 +161,16 @@ impl<T: VEq, const N: usize> VEq for Vector<T, N> {
     fn v_ne(self, other: Self) -> Self::Mask {
         self.map2(other, T::v_ne)
     }
+
+    #[inline]
+    fn v_eq_zero(self) -> Self::Mask {
+        self.map(T::v_eq_zero)
+    }
+
+    #[inline]
+    fn v_ne_zero(self) -> Self::Mask {
+        self.map(T::v_ne_zero)
+    }
 }
 
 impl<T: VOrd, const N: usize> VOrd for Vector<T, N> {
@@ -169,6 +192,26 @@ impl<T: VOrd, const N: usize> VOrd for Vector<T, N> {
     #[inline]
     fn v_ge(self, other: Self) -> Self::Mask {
         self.map2(other, T::v_ge)
+    }
+
+    #[inline]
+    fn v_lt_zero(self) -> Self::Mask {
+        self.map(T::v_lt_zero)
+    }
+
+    #[inline]
+    fn v_le_zero(self) -> Self::Mask {
+        self.map(T::v_le_zero)
+    }
+
+    #[inline]
+    fn v_gt_zero(self) -> Self::Mask {
+        self.map(T::v_gt_zero)
+    }
+
+    #[inline]
+    fn v_ge_zero(self) -> Self::Mask {
+        self.map(T::v_ge_zero)
     }
 
     #[inline]
@@ -205,6 +248,13 @@ impl<T: Vectorize + Add<Output = T>, const N: usize> VSum for Vector<T, N> {
     #[inline]
     fn v_sum(self) -> T {
         self.reduce(T::add)
+    }
+}
+
+impl<T: Vectorize + Mul<Output = T>, const N: usize> VProduct for Vector<T, N> {
+    #[inline]
+    fn v_product(self) -> T {
+        self.reduce(T::mul)
     }
 }
 

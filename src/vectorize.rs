@@ -6,6 +6,10 @@ pub trait Vectorize: Copy + From<Self::Lane> {
     type Mask: VMask + VSelect<Self>;
 
     const LANES: usize;
+
+    fn v_zero() -> Self;
+
+    fn v_one() -> Self;
 }
 
 pub trait VMask:
@@ -44,6 +48,16 @@ pub trait VEq: Vectorize {
     fn v_ne(self, other: Self) -> Self::Mask {
         !self.v_eq(other)
     }
+
+    #[inline]
+    fn v_eq_zero(self) -> Self::Mask {
+        self.v_eq(Self::v_zero())
+    }
+
+    #[inline]
+    fn v_ne_zero(self) -> Self::Mask {
+        !self.v_eq_zero()
+    }
 }
 
 pub trait VOrd: VEq {
@@ -65,6 +79,26 @@ pub trait VOrd: VEq {
     }
 
     #[inline]
+    fn v_lt_zero(self) -> Self::Mask {
+        self.v_lt(Self::v_zero())
+    }
+
+    #[inline]
+    fn v_le_zero(self) -> Self::Mask {
+        self.v_le(Self::v_zero())
+    }
+
+    #[inline]
+    fn v_gt_zero(self) -> Self::Mask {
+        self.v_gt(Self::v_zero())
+    }
+
+    #[inline]
+    fn v_ge_zero(self) -> Self::Mask {
+        self.v_ge(Self::v_zero())
+    }
+
+    #[inline]
     fn v_min(self, other: Self) -> Self {
         self.v_lt(other).v_select(self, other)
     }
@@ -82,6 +116,10 @@ pub trait VOrd: VEq {
 
 pub trait VSum<Output = <Self as Vectorize>::Lane>: Vectorize {
     fn v_sum(self) -> Output;
+}
+
+pub trait VProduct<Output = <Self as Vectorize>::Lane>: Vectorize {
+    fn v_product(self) -> Output;
 }
 
 pub trait VLeast: VOrd {
@@ -147,6 +185,18 @@ macro_rules! impl_scalar {
             type Mask = bool;
 
             const LANES: usize = 1;
+
+            #[inline]
+            fn v_zero() -> Self {
+                use num::Zero;
+                Self::zero()
+            }
+
+            #[inline]
+            fn v_one() -> Self {
+                use num::One;
+                Self::one()
+            }
         }
 
         impl VEq for $typ {
@@ -196,6 +246,13 @@ macro_rules! impl_scalar {
         impl VSum<Self> for $typ {
             #[inline]
             fn v_sum(self) -> Self {
+                self
+            }
+        }
+
+        impl VProduct<Self> for $typ {
+            #[inline]
+            fn v_product(self) -> Self {
                 self
             }
         }

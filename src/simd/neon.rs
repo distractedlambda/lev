@@ -208,6 +208,18 @@ macro_rules! simd_types_clause {
             type Mask = $mask;
 
             const LANES: usize = $lanes;
+
+            #[inline]
+            fn v_zero() -> Self {
+                use num::Zero;
+                Self::from(Self::Lane::zero())
+            }
+
+            #[inline]
+            fn v_one() -> Self {
+                use num::One;
+                Self::from(Self::Lane::one())
+            }
         }
     };
 
@@ -248,11 +260,16 @@ macro_rules! simd_types_clause {
         }
     };
 
-    ($name:ident, [VEq => $func:ident]) => {
+    ($name:ident, [VEq => $eq_func:ident, $eq_zero_func:ident]) => {
         impl crate::vectorize::VEq for $name {
             #[inline]
             fn v_eq(self, other: Self) -> Self::Mask {
-                (unsafe { arch::$func(self.0, other.0) }).into()
+                (unsafe { arch::$eq_func(self.0, other.0) }).into()
+            }
+
+            #[inline]
+            fn v_eq_zero(self) -> Self::Mask {
+                (unsafe { arch::$eq_zero_func(self.0) }).into()
             }
         }
     };
@@ -449,7 +466,7 @@ simd_types! {
 
     U8x8(uint8x8_t) {
         [Vectorize => u8, Mask8x8, 8, vdup_n_u8]
-        [VEq => vceq_u8]
+        [VEq => vceq_u8, vceqz_u8]
         [VOrd => vclt_u8, vcle_u8, vcgt_u8, vcge_u8, vmin_u8, vmax_u8]
         [Not => vmvn_u8]
         [Add => vadd_u8]
@@ -465,7 +482,7 @@ simd_types! {
 
     U8x16(uint8x16_t) {
         [Vectorize => u8, Mask8x16, 16, vdupq_n_u8]
-        [VEq => vceqq_u8]
+        [VEq => vceqq_u8, vceqzq_u8]
         [VOrd => vcltq_u8, vcleq_u8, vcgtq_u8, vcgeq_u8, vminq_u8, vmaxq_u8]
         [Not => vmvnq_u8]
         [Add => vaddq_u8]
@@ -481,7 +498,7 @@ simd_types! {
 
     U16x4(uint16x4_t) {
         [Vectorize => u16, Mask16x4, 4, vdup_n_u16]
-        [VEq => vceq_u16]
+        [VEq => vceq_u16, vceqz_u16]
         [VOrd => vclt_u16, vcle_u16, vcgt_u16, vcge_u16, vmin_u16, vmax_u16]
         [Not => vmvn_u16]
         [Add => vadd_u16]
@@ -497,7 +514,7 @@ simd_types! {
 
     U16x8(uint16x8_t) {
         [Vectorize => u16, Mask16x8, 8, vdupq_n_u16]
-        [VEq => vceqq_u16]
+        [VEq => vceqq_u16, vceqzq_u16]
         [VOrd => vcltq_u16, vcleq_u16, vcgtq_u16, vcgeq_u16, vminq_u16, vmaxq_u16]
         [Not => vmvnq_u16]
         [Add => vaddq_u16]
@@ -513,7 +530,7 @@ simd_types! {
 
     U32x2(uint32x2_t) {
         [Vectorize => u32, Mask32x2, 2, vdup_n_u32]
-        [VEq => vceq_u32]
+        [VEq => vceq_u32, vceqz_u32]
         [VOrd => vclt_u32, vcle_u32, vcgt_u32, vcge_u32, vmin_u32, vmax_u32]
         [Not => vmvn_u32]
         [Add => vadd_u32]
@@ -529,7 +546,7 @@ simd_types! {
 
     U32x4(uint32x4_t) {
         [Vectorize => u32, Mask32x4, 4, vdupq_n_u32]
-        [VEq => vceqq_u32]
+        [VEq => vceqq_u32, vceqzq_u32]
         [VOrd => vcltq_u32, vcleq_u32, vcgtq_u32, vcgeq_u32, vminq_u32, vmaxq_u32]
         [Not => vmvnq_u32]
         [Add => vaddq_u32]
@@ -545,7 +562,7 @@ simd_types! {
 
     U64x2(uint64x2_t) {
         [Vectorize => u64, Mask64x2, 2, vdupq_n_u64]
-        [VEq => vceqq_u64]
+        [VEq => vceqq_u64, vceqzq_u64]
         [VOrd => vcltq_u64, vcleq_u64, vcgtq_u64, vcgeq_u64]
         [Add => vaddq_u64]
         [Sub => vsubq_u64]
@@ -557,7 +574,7 @@ simd_types! {
 
     I8x8(int8x8_t) {
         [Vectorize => i8, Mask8x8, 8, vdup_n_s8]
-        [VEq => vceq_s8]
+        [VEq => vceq_s8, vceqz_s8]
         [VOrd => vclt_s8, vcle_s8, vcgt_s8, vcge_s8, vmin_s8, vmax_s8]
         [Neg => vneg_s8]
         [Not => vmvn_s8]
@@ -574,7 +591,7 @@ simd_types! {
 
     I8x16(int8x16_t) {
         [Vectorize => i8, Mask8x16, 16, vdupq_n_s8]
-        [VEq => vceqq_s8]
+        [VEq => vceqq_s8, vceqzq_s8]
         [VOrd => vcltq_s8, vcleq_s8, vcgtq_s8, vcgeq_s8, vminq_s8, vmaxq_s8]
         [Neg => vnegq_s8]
         [Not => vmvnq_s8]
@@ -591,7 +608,7 @@ simd_types! {
 
     I16x4(int16x4_t) {
         [Vectorize => i16, Mask16x4, 4, vdup_n_s16]
-        [VEq => vceq_s16]
+        [VEq => vceq_s16, vceqz_s16]
         [VOrd => vclt_s16, vcle_s16, vcgt_s16, vcge_s16, vmin_s16, vmax_s16]
         [Neg => vneg_s16]
         [Not => vmvn_s16]
@@ -608,7 +625,7 @@ simd_types! {
 
     I16x8(int16x8_t) {
         [Vectorize => i16, Mask16x8, 8, vdupq_n_s16]
-        [VEq => vceqq_s16]
+        [VEq => vceqq_s16, vceqzq_s16]
         [VOrd => vcltq_s16, vcleq_s16, vcgtq_s16, vcgeq_s16, vminq_s16, vmaxq_s16]
         [Neg => vnegq_s16]
         [Not => vmvnq_s16]
@@ -625,7 +642,7 @@ simd_types! {
 
     I32x2(int32x2_t) {
         [Vectorize => i32, Mask32x2, 2, vdup_n_s32]
-        [VEq => vceq_s32]
+        [VEq => vceq_s32, vceqz_s32]
         [VOrd => vclt_s32, vcle_s32, vcgt_s32, vcge_s32, vmin_s32, vmax_s32]
         [Neg => vneg_s32]
         [Not => vmvn_s32]
@@ -642,7 +659,7 @@ simd_types! {
 
     I32x4(int32x4_t) {
         [Vectorize => i32, Mask32x4, 4, vdupq_n_s32]
-        [VEq => vceqq_s32]
+        [VEq => vceqq_s32, vceqzq_s32]
         [VOrd => vcltq_s32, vcleq_s32, vcgtq_s32, vcgeq_s32, vminq_s32, vmaxq_s32]
         [Neg => vnegq_s32]
         [Not => vmvnq_s32]
@@ -659,7 +676,7 @@ simd_types! {
 
     I64x2(int64x2_t) {
         [Vectorize => i64, Mask64x2, 2, vdupq_n_s64]
-        [VEq => vceqq_s64]
+        [VEq => vceqq_s64, vceqzq_s64]
         [VOrd => vcltq_s64, vcleq_s64, vcgtq_s64, vcgeq_s64]
         [Neg => vnegq_s64]
         [Add => vaddq_s64]
@@ -672,7 +689,7 @@ simd_types! {
 
     F32x2(float32x2_t) {
         [Vectorize => f32, Mask32x2, 2, vdup_n_f32]
-        [VEq => vceq_f32]
+        [VEq => vceq_f32, vceqz_f32]
         [VOrd => vclt_f32, vcle_f32, vcgt_f32, vcge_f32, vminnm_f32, vmaxnm_f32]
         [Neg => vneg_f32]
         [Add => vadd_f32]
@@ -691,7 +708,7 @@ simd_types! {
 
     F32x4(float32x4_t) {
         [Vectorize => f32, Mask32x4, 4, vdupq_n_f32]
-        [VEq => vceqq_f32]
+        [VEq => vceqq_f32, vceqzq_f32]
         [VOrd => vcltq_f32, vcleq_f32, vcgtq_f32, vcgeq_f32, vminnmq_f32, vmaxnmq_f32]
         [Neg => vnegq_f32]
         [Add => vaddq_f32]
@@ -710,7 +727,7 @@ simd_types! {
 
     F64x2(float64x2_t) {
         [Vectorize => f64, Mask64x2, 2, vdupq_n_f64]
-        [VEq => vceqq_f64]
+        [VEq => vceqq_f64, vceqzq_f64]
         [VOrd => vcltq_f64, vcleq_f64, vcgtq_f64, vcgeq_f64, vminnmq_f64, vmaxnmq_f64]
         [Neg => vnegq_f64]
         [Add => vaddq_f64]

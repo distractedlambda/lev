@@ -1,6 +1,9 @@
-use std::ops::{BitOr, Mul, Sub};
+use std::ops::{Mul, Sub};
 
-use crate::vector::Vector;
+use crate::{
+    vector::Vector,
+    vectorize::{VMask, VOrd, VProduct, Vectorize},
+};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Aabb<T, const DIMENSIONS: usize> {
@@ -13,47 +16,46 @@ impl<T, const DIMENSIONS: usize> Aabb<T, DIMENSIONS> {
         Self { min, max }
     }
 
-    // pub fn extent(self) -> Vector<T::Output, DIMENSIONS>
-    // where
-    //     T: Sub,
-    // {
-    //     self.max - self.min
-    // }
+    pub fn extent(self) -> Vector<T::Output, DIMENSIONS>
+    where
+        T: Sub,
+    {
+        self.max - self.min
+    }
 
-    // pub fn area(self) -> T::Output
-    // where
-    //     T: Sub,
-    //     T::Output: Mul<Output = T::Output>,
-    // {
-    //     self.extent().vproduct()
-    // }
+    pub fn area(self) -> T::Output
+    where
+        T: Sub,
+        T::Output: Mul<Output = T::Output> + Vectorize,
+    {
+        self.extent().v_product()
+    }
 
-    // pub fn empty(self) -> <T::Output as VLe>::Output
-    // where
-    //     T: Sub,
-    //     T::Output: VLe + VZero,
-    //     <T::Output as VLe>::Output: BitOr<Output = <T::Output as VLe>::Output>,
-    // {
-    //     self.extent().vle(VZero::vzero()).vany()
-    // }
+    pub fn empty(self) -> <T::Output as Vectorize>::Mask
+    where
+        T: Sub,
+        T::Output: VOrd,
+    {
+        self.extent().v_le_zero().v_any()
+    }
 
-    // pub fn union(self, other: Self) -> Aabb<<T as VMax>::Output, DIMENSIONS>
-    // where
-    //     T: VMax + VMin<Output = <T as VMax>::Output>,
-    // {
-    //     Aabb {
-    //         min: self.min.vmin(other.min),
-    //         max: self.max.vmax(other.max),
-    //     }
-    // }
+    pub fn union(self, other: Self) -> Self
+    where
+        T: VOrd,
+    {
+        Aabb {
+            min: self.min.v_min(other.min),
+            max: self.max.v_max(other.max),
+        }
+    }
 
-    // pub fn intersection(self, other: Self) -> Aabb<<T as VMax>::Output,
-    // DIMENSIONS> where
-    //     T: VMax + VMin<Output = <T as VMax>::Output>,
-    // {
-    //     Aabb {
-    //         min: self.min.vmax(other.min),
-    //         max: self.max.vmin(other.max),
-    //     }
-    // }
+    pub fn intersection(self, other: Self) -> Self
+    where
+        T: VOrd,
+    {
+        Aabb {
+            min: self.min.v_max(other.min),
+            max: self.max.v_min(other.max),
+        }
+    }
 }
