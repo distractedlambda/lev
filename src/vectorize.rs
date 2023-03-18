@@ -1,20 +1,25 @@
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Not};
 
-pub trait Vectorize: Copy + From<Self::Lane> {
+pub trait Vectorize: Copy {
     type Lane;
 
     type Mask: VMask + VSelect<Self>;
 
     const LANES: usize;
 
+    fn v_splat(value: Self::Lane) -> Self;
+
     fn v_zero() -> Self;
 
     fn v_one() -> Self;
+
+    fn v_get(&self, index: usize) -> &Self::Lane;
+
+    fn v_get_mut(&mut self, index: usize) -> &mut Self::Lane;
 }
 
 pub trait VMask:
     Copy
-    + From<Self::Lane>
     + Not<Output = Self>
     + BitAnd<Output = Self>
     + BitOr<Output = Self>
@@ -23,16 +28,18 @@ pub trait VMask:
     + BitOrAssign
     + BitXorAssign
 {
-    type Lane: Not<Output = Self::Lane>;
+    type MaskLane: Not<Output = Self::MaskLane>;
 
-    const LANES: usize;
+    const MASK_LANES: usize;
 
-    fn v_any(self) -> Self::Lane;
+    fn v_splat_mask(value: Self::MaskLane) -> Self;
 
-    fn v_all(self) -> Self::Lane;
+    fn v_any(self) -> Self::MaskLane;
+
+    fn v_all(self) -> Self::MaskLane;
 
     #[inline]
-    fn v_none(self) -> Self::Lane {
+    fn v_none(self) -> Self::MaskLane {
         !self.v_any()
     }
 }
@@ -151,9 +158,14 @@ pub trait VSqrt: Vectorize {
 }
 
 impl VMask for bool {
-    type Lane = bool;
+    type MaskLane = bool;
 
-    const LANES: usize = 1;
+    const MASK_LANES: usize = 1;
+
+    #[inline]
+    fn v_splat_mask(value: Self::MaskLane) -> Self {
+        value
+    }
 
     #[inline]
     fn v_any(self) -> bool {
@@ -164,6 +176,15 @@ impl VMask for bool {
     fn v_all(self) -> bool {
         self
     }
+
+    // #[inline]
+    // fn v_first(self) -> Option<usize> {
+    //     if self {
+    //         Some(0)
+    //     } else {
+    //         None
+    //     }
+    // }
 }
 
 impl<T> VSelect<T> for bool {
@@ -187,6 +208,11 @@ macro_rules! impl_scalar {
             const LANES: usize = 1;
 
             #[inline]
+            fn v_splat(value: $typ) -> Self {
+                value
+            }
+
+            #[inline]
             fn v_zero() -> Self {
                 use num::Zero;
                 Self::zero()
@@ -196,6 +222,18 @@ macro_rules! impl_scalar {
             fn v_one() -> Self {
                 use num::One;
                 Self::one()
+            }
+
+            #[inline]
+            fn v_get(&self, index: usize) -> &Self {
+                assert_eq!(index, 0);
+                self
+            }
+
+            #[inline]
+            fn v_get_mut(&mut self, index: usize) -> &mut Self {
+                assert_eq!(index, 0);
+                self
             }
         }
 

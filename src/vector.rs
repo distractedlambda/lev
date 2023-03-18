@@ -118,6 +118,11 @@ impl<T: Vectorize, const N: usize> Vectorize for Vector<T, N> {
     const LANES: usize = N;
 
     #[inline]
+    fn v_splat(value: Self::Lane) -> Self {
+        Self([value; N])
+    }
+
+    #[inline]
     fn v_zero() -> Self {
         T::v_zero().into()
     }
@@ -126,20 +131,35 @@ impl<T: Vectorize, const N: usize> Vectorize for Vector<T, N> {
     fn v_one() -> Self {
         T::v_one().into()
     }
+
+    #[inline]
+    fn v_get(&self, index: usize) -> &Self::Lane {
+        &self.0[index]
+    }
+
+    #[inline]
+    fn v_get_mut(&mut self, index: usize) -> &mut Self::Lane {
+        &mut self.0[index]
+    }
 }
 
 impl<T: VMask, const N: usize> VMask for Vector<T, N> {
-    type Lane = T;
+    type MaskLane = T;
 
-    const LANES: usize = N;
+    const MASK_LANES: usize = N;
 
     #[inline]
-    fn v_any(self) -> Self::Lane {
+    fn v_splat_mask(value: Self::MaskLane) -> Self {
+        Self([value; N])
+    }
+
+    #[inline]
+    fn v_any(self) -> Self::MaskLane {
         self.reduce(T::bitor)
     }
 
     #[inline]
-    fn v_all(self) -> Self::Lane {
+    fn v_all(self) -> Self::MaskLane {
         self.reduce(T::bitand)
     }
 }

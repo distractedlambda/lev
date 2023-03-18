@@ -195,13 +195,6 @@ macro_rules! simd_types_clause {
     };
 
     ($name:ident, [Vectorize => $scalar:ty, $mask:ty, $lanes:literal, $splat_func:ident]) => {
-        impl From<$scalar> for $name {
-            #[inline]
-            fn from(value: $scalar) -> Self {
-                Self(unsafe { arch::$splat_func(value) })
-            }
-        }
-
         impl crate::vectorize::Vectorize for $name {
             type Lane = $scalar;
 
@@ -210,15 +203,32 @@ macro_rules! simd_types_clause {
             const LANES: usize = $lanes;
 
             #[inline]
+            fn v_splat(value: Self::Lane) -> Self {
+                Self(unsafe { arch::$splat_func(value) })
+            }
+
+            #[inline]
             fn v_zero() -> Self {
                 use num::Zero;
-                Self::from(Self::Lane::zero())
+                Self::v_splat(Self::Lane::zero())
             }
 
             #[inline]
             fn v_one() -> Self {
                 use num::One;
-                Self::from(Self::Lane::one())
+                Self::v_splat(Self::Lane::one())
+            }
+
+            #[inline]
+            fn v_get(&self, index: usize) -> &$scalar {
+                assert!(index < $lanes);
+                unsafe { &*(self as *const _ as *const $scalar).add(index) }
+            }
+
+            #[inline]
+            fn v_get_mut(&mut self, index: usize) -> &mut $scalar {
+                assert!(index < $lanes);
+                unsafe { &mut *(self as *mut _ as *mut $scalar).add(index) }
             }
         }
     };
@@ -227,17 +237,15 @@ macro_rules! simd_types_clause {
         $name:ident,
         [VMask => $scalar:ty, $lanes:literal, $splat_func:ident, $max_func:ident, $min_func:ident]
     ) => {
-        impl From<bool> for $name {
+        impl crate::vectorize::VMask for $name {
+            type MaskLane = bool;
+
+            const MASK_LANES: usize = $lanes;
+
             #[inline]
-            fn from(value: bool) -> Self {
+            fn v_splat_mask(value: bool) -> Self {
                 Self(unsafe { arch::$splat_func(if value { <$scalar>::MAX } else { 0 }) })
             }
-        }
-
-        impl crate::vectorize::VMask for $name {
-            type Lane = bool;
-
-            const LANES: usize = $lanes;
 
             #[inline]
             fn v_any(self) -> bool {
@@ -754,17 +762,15 @@ impl Not for Mask64x2 {
     }
 }
 
-impl From<bool> for Mask64x2 {
+impl VMask for Mask64x2 {
+    type MaskLane = bool;
+
+    const MASK_LANES: usize = 2;
+
     #[inline]
-    fn from(value: bool) -> Self {
+    fn v_splat_mask(value: Self::MaskLane) -> Self {
         Self(unsafe { arch::vdupq_n_u64(if value { u64::MAX } else { 0 }) })
     }
-}
-
-impl VMask for Mask64x2 {
-    type Lane = bool;
-
-    const LANES: usize = 2;
 
     #[inline]
     fn v_any(self) -> bool {
