@@ -1,437 +1,591 @@
 use std::{
     borrow::{Borrow, BorrowMut},
-    ops::{Add, Index, IndexMut, Mul},
+    iter::{Product, Sum},
+    ops::{
+        Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Div,
+        DivAssign, Index, IndexMut, Mul, MulAssign, Neg, Not, Rem, RemAssign, Shl, ShlAssign, Shr,
+        ShrAssign, Sub, SubAssign,
+    },
+    simd::{
+        LaneCount, Simd, SimdElement, SimdFloat, SimdOrd, SimdPartialEq, SimdPartialOrd,
+        SupportedLaneCount,
+    },
+    vec::IntoIter,
 };
 
-use crate::vectorize::{
-    VCeil, VEq, VFloor, VGreatest, VLeast, VMask, VOrd, VProduct, VSelect, VSqrt, VSum, VTrunc,
-    Vectorize,
-};
-
-#[repr(transparent)]
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct Vector<T, const N: usize>([T; N]);
+pub struct Vector<T, const LEN: usize>([T; LEN]);
 
-impl<T, const N: usize> Vector<T, N> {
+impl<T, const LEN: usize> Vector<T, LEN> {
     #[inline]
-    pub fn each_from<U>(other: Vector<U, N>) -> Self
-    where
-        T: From<U>,
-    {
-        Self(other.0.map(T::from))
-    }
-
-    #[inline]
-    pub fn each_into<U>(self) -> Vector<U, N>
-    where
-        T: Into<U>,
-    {
-        Vector(self.0.map(T::into))
-    }
-
-    #[inline]
-    pub fn each_ref(&self) -> Vector<&T, N> {
+    pub fn each_ref(&self) -> Vector<&T, LEN> {
         Vector(self.0.each_ref())
     }
 
     #[inline]
-    pub fn each_mut(&mut self) -> Vector<&mut T, N> {
+    pub fn each_mut(&mut self) -> Vector<&mut T, LEN> {
         Vector(self.0.each_mut())
     }
 
     #[inline]
-    pub fn zip<U>(self, other: Vector<U, N>) -> Vector<(T, U), N> {
-        Vector(self.0.zip(other.0))
-    }
-
-    #[inline]
-    pub fn map<U>(self, f: impl FnMut(T) -> U) -> Vector<U, N> {
+    pub fn map<U>(self, f: impl FnMut(T) -> U) -> Vector<U, LEN> {
         Vector(self.0.map(f))
     }
 
     #[inline]
-    pub fn map2<U, V>(self, other: Vector<U, N>, mut f: impl FnMut(T, U) -> V) -> Vector<V, N> {
-        self.zip(other).map(|(t, u)| f(t, u))
+    pub fn map2<U, V>(self, other: Vector<U, LEN>, mut f: impl FnMut(T, U) -> V) -> Vector<V, LEN> {
+        self.zip(other).map(|(a, b)| f(a, b))
     }
 
+    #[inline]
     pub fn map3<U, V, W>(
         self,
-        other1: Vector<U, N>,
-        other2: Vector<V, N>,
+        other1: Vector<U, LEN>,
+        other2: Vector<V, LEN>,
         mut f: impl FnMut(T, U, V) -> W,
-    ) -> Vector<W, N> {
+    ) -> Vector<W, LEN> {
         self.map2(other1.zip(other2), |a, (b, c)| f(a, b, c))
     }
 
     #[inline]
-    pub fn update(&mut self, f: impl FnMut(&mut T)) {
-        self.0.iter_mut().for_each(f)
-    }
-
-    #[inline]
-    pub fn update2<U>(&mut self, other: Vector<U, N>, mut f: impl FnMut(&mut T, U)) {
-        self.0
-            .each_mut()
-            .zip(other.0)
-            .into_iter()
-            .for_each(|(t, u)| f(t, u))
+    pub fn zip<U>(self, other: Vector<U, LEN>) -> Vector<(T, U), LEN> {
+        Vector(self.0.zip(other.0))
     }
 
     #[inline]
     pub fn reduce(self, f: impl FnMut(T, T) -> T) -> T {
-        self.0.into_iter().reduce(f).unwrap()
+        self.into_iter().reduce(f).unwrap()
     }
 
     #[inline]
-    pub fn dot<U>(self, other: Vector<U, N>) -> T::Output
+    pub fn each_from<U>(other: Vector<U, LEN>) -> Self
+    where
+        T: From<U>,
+    {
+        other.map(T::from)
+    }
+
+    #[inline]
+    pub fn each_into<U>(self) -> Vector<U, LEN>
+    where
+        T: Into<U>,
+    {
+        self.map(T::into)
+    }
+
+    #[inline]
+    pub fn iter(&self) -> <&[T; LEN] as IntoIterator>::IntoIter {
+        self.0.iter()
+    }
+
+    #[inline]
+    pub fn iter_mut(&mut self) -> <&mut [T; LEN] as IntoIterator>::IntoIter {
+        self.0.iter_mut()
+    }
+
+    #[inline]
+    pub fn sum<U: Sum<T>>(self) -> U {
+        self.into_iter().sum()
+    }
+
+    #[inline]
+    pub fn product<U: Product<T>>(self) -> U {
+        self.into_iter().product()
+    }
+
+    #[inline]
+    pub fn dot<U, V: Sum<<T as Mul<U>>::Output>>(self, other: Vector<U, LEN>) -> V
     where
         T: Mul<U>,
-        T::Output: Add<Output = T::Output> + Vectorize,
     {
-        (self * other).v_sum()
+        (self * other).sum()
     }
 
     #[inline]
-    pub fn norm_squared(self) -> T::Output
+    pub fn norm_squared<U: Sum<<T as Mul>::Output>>(self) -> U
     where
-        T: Clone + Mul,
-        T::Output: Add<Output = T::Output> + Vectorize,
+        T: Mul + Clone,
     {
         self.clone().dot(self)
     }
 
     #[inline]
-    pub fn norm(self) -> T::Output
+    pub fn each_eq<U>(&self, other: &Vector<U, LEN>) -> Vector<bool, LEN>
     where
-        T: Clone + Mul,
-        T::Output: Add<Output = T::Output> + VSqrt,
+        T: PartialEq<U>,
     {
-        self.norm_squared().v_sqrt()
+        self.each_ref().map2(other.each_ref(), T::eq)
+    }
+
+    #[inline]
+    pub fn each_ne<U>(&self, other: &Vector<U, LEN>) -> Vector<bool, LEN>
+    where
+        T: PartialEq<U>,
+    {
+        self.each_ref().map2(other.each_ref(), T::ne)
+    }
+
+    #[inline]
+    pub fn each_lt<U>(&self, other: &Vector<U, LEN>) -> Vector<bool, LEN>
+    where
+        T: PartialOrd<U>,
+    {
+        self.each_ref().map2(other.each_ref(), T::lt)
+    }
+
+    #[inline]
+    pub fn each_le<U>(&self, other: &Vector<U, LEN>) -> Vector<bool, LEN>
+    where
+        T: PartialOrd<U>,
+    {
+        self.each_ref().map2(other.each_ref(), T::le)
+    }
+
+    #[inline]
+    pub fn each_gt<U>(&self, other: &Vector<U, LEN>) -> Vector<bool, LEN>
+    where
+        T: PartialOrd<U>,
+    {
+        self.each_ref().map2(other.each_ref(), T::gt)
+    }
+
+    #[inline]
+    pub fn each_ge<U>(&self, other: &Vector<U, LEN>) -> Vector<bool, LEN>
+    where
+        T: PartialOrd<U>,
+    {
+        self.each_ref().map2(other.each_ref(), T::ge)
     }
 }
 
-impl<T: Vectorize, const N: usize> Vectorize for Vector<T, N> {
-    type Lane = T;
-
-    type Mask = Vector<T::Mask, N>;
-
-    const LANES: usize = N;
-
+impl<T: Ord, const LEN: usize> Vector<T, LEN> {
     #[inline]
-    fn v_splat(value: Self::Lane) -> Self {
-        Self([value; N])
+    pub fn each_min(self, other: Vector<T, LEN>) -> Vector<T, LEN> {
+        self.map2(other, T::min)
     }
 
     #[inline]
-    fn v_zero() -> Self {
-        T::v_zero().into()
+    pub fn each_max(self, other: Vector<T, LEN>) -> Vector<T, LEN> {
+        self.map2(other, T::max)
     }
 
     #[inline]
-    fn v_one() -> Self {
-        T::v_one().into()
-    }
-
-    #[inline]
-    fn v_get(&self, index: usize) -> &Self::Lane {
-        &self.0[index]
-    }
-
-    #[inline]
-    fn v_get_mut(&mut self, index: usize) -> &mut Self::Lane {
-        &mut self.0[index]
+    pub fn each_clamp(self, min: Vector<T, LEN>, max: Vector<T, LEN>) -> Vector<T, LEN> {
+        self.map3(min, max, T::clamp)
     }
 }
 
-impl<T: VMask, const N: usize> VMask for Vector<T, N> {
-    type MaskLane = T;
-
-    const MASK_LANES: usize = N;
-
+impl<T: SimdPartialEq, const LEN: usize> Vector<T, LEN> {
     #[inline]
-    fn v_splat_mask(value: Self::MaskLane) -> Self {
-        Self([value; N])
+    pub fn each_simd_eq(self, other: Vector<T, LEN>) -> Vector<T::Mask, LEN> {
+        self.map2(other, T::simd_eq)
     }
 
     #[inline]
-    fn v_any(self) -> Self::MaskLane {
-        self.reduce(T::bitor)
-    }
-
-    #[inline]
-    fn v_all(self) -> Self::MaskLane {
-        self.reduce(T::bitand)
+    pub fn each_simd_ne(self, other: Vector<T, LEN>) -> Vector<T::Mask, LEN> {
+        self.map2(other, T::simd_ne)
     }
 }
 
-impl<T: VSelect<U>, U, const N: usize> VSelect<Vector<U, N>> for Vector<T, N> {
+impl<T: SimdPartialOrd, const LEN: usize> Vector<T, LEN> {
     #[inline]
-    fn v_select(self, if_true: Vector<U, N>, if_false: Vector<U, N>) -> Vector<U, N> {
-        self.map3(if_true, if_false, T::v_select)
+    pub fn each_simd_lt(self, other: Vector<T, LEN>) -> Vector<T::Mask, LEN> {
+        self.map2(other, T::simd_lt)
+    }
+
+    #[inline]
+    pub fn each_simd_le(self, other: Vector<T, LEN>) -> Vector<T::Mask, LEN> {
+        self.map2(other, T::simd_le)
+    }
+
+    #[inline]
+    pub fn each_simd_gt(self, other: Vector<T, LEN>) -> Vector<T::Mask, LEN> {
+        self.map2(other, T::simd_gt)
+    }
+
+    #[inline]
+    pub fn each_simd_ge(self, other: Vector<T, LEN>) -> Vector<T::Mask, LEN> {
+        self.map2(other, T::simd_ge)
     }
 }
 
-impl<T: VEq, const N: usize> VEq for Vector<T, N> {
+impl<T: SimdOrd, const LEN: usize> Vector<T, LEN> {
     #[inline]
-    fn v_eq(self, other: Self) -> Self::Mask {
-        self.map2(other, T::v_eq)
+    pub fn each_simd_min(self, other: Vector<T, LEN>) -> Vector<T, LEN> {
+        self.map2(other, T::simd_min)
     }
 
     #[inline]
-    fn v_ne(self, other: Self) -> Self::Mask {
-        self.map2(other, T::v_ne)
+    pub fn each_simd_max(self, other: Vector<T, LEN>) -> Vector<T, LEN> {
+        self.map2(other, T::simd_max)
     }
 
     #[inline]
-    fn v_eq_zero(self) -> Self::Mask {
-        self.map(T::v_eq_zero)
-    }
-
-    #[inline]
-    fn v_ne_zero(self) -> Self::Mask {
-        self.map(T::v_ne_zero)
+    pub fn each_simd_clamp(self, min: Vector<T, LEN>, max: Vector<T, LEN>) -> Vector<T, LEN> {
+        self.map3(min, max, T::simd_clamp)
     }
 }
 
-impl<T: VOrd, const N: usize> VOrd for Vector<T, N> {
+impl<T: SimdFloat, const LEN: usize> Vector<T, LEN> {
     #[inline]
-    fn v_lt(self, other: Self) -> Self::Mask {
-        self.map2(other, T::v_lt)
+    pub fn each_simd_to_bits(self) -> Vector<T::Bits, LEN> {
+        self.map(T::to_bits)
     }
 
     #[inline]
-    fn v_le(self, other: Self) -> Self::Mask {
-        self.map2(other, T::v_le)
+    pub fn each_simd_fmin(self, other: Vector<T, LEN>) -> Vector<T, LEN> {
+        self.map2(other, T::simd_min)
     }
 
     #[inline]
-    fn v_gt(self, other: Self) -> Self::Mask {
-        self.map2(other, T::v_gt)
-    }
-
-    #[inline]
-    fn v_ge(self, other: Self) -> Self::Mask {
-        self.map2(other, T::v_ge)
-    }
-
-    #[inline]
-    fn v_lt_zero(self) -> Self::Mask {
-        self.map(T::v_lt_zero)
-    }
-
-    #[inline]
-    fn v_le_zero(self) -> Self::Mask {
-        self.map(T::v_le_zero)
-    }
-
-    #[inline]
-    fn v_gt_zero(self) -> Self::Mask {
-        self.map(T::v_gt_zero)
-    }
-
-    #[inline]
-    fn v_ge_zero(self) -> Self::Mask {
-        self.map(T::v_ge_zero)
-    }
-
-    #[inline]
-    fn v_min(self, other: Self) -> Self {
-        self.map2(other, T::v_min)
-    }
-
-    #[inline]
-    fn v_max(self, other: Self) -> Self {
-        self.map2(other, T::v_max)
-    }
-
-    #[inline]
-    fn v_clamp(self, min: Self, max: Self) -> Self {
-        self.map3(min, max, T::v_clamp)
+    pub fn each_simd_fmax(self, other: Vector<T, LEN>) -> Vector<T, LEN> {
+        self.map2(other, T::simd_max)
     }
 }
 
-impl<T: VOrd, const N: usize> VLeast for Vector<T, N> {
+impl<T: SimdPartialEq, const LEN: usize> SimdPartialEq for Vector<T, LEN>
+where
+    T::Mask: BitAnd<Output = T::Mask>,
+{
+    type Mask = T::Mask;
+
     #[inline]
-    fn v_least(self) -> Self::Lane {
-        self.reduce(T::v_min)
+    fn simd_eq(self, other: Self) -> Self::Mask {
+        self.map2(other, T::simd_eq).reduce(BitAnd::bitand)
+    }
+
+    #[inline]
+    fn simd_ne(self, other: Self) -> Self::Mask {
+        self.map2(other, T::simd_ne).reduce(BitAnd::bitand)
     }
 }
 
-impl<T: VOrd, const N: usize> VGreatest for Vector<T, N> {
-    #[inline]
-    fn v_greatest(self) -> Self::Lane {
-        self.reduce(T::v_max)
-    }
-}
-
-impl<T: Vectorize + Add<Output = T>, const N: usize> VSum for Vector<T, N> {
-    #[inline]
-    fn v_sum(self) -> T {
-        self.reduce(T::add)
-    }
-}
-
-impl<T: Vectorize + Mul<Output = T>, const N: usize> VProduct for Vector<T, N> {
-    #[inline]
-    fn v_product(self) -> T {
-        self.reduce(T::mul)
-    }
-}
-
-impl<T: VFloor, const N: usize> VFloor for Vector<T, N> {
-    #[inline]
-    fn v_floor(self) -> Self {
-        self.map(T::v_floor)
-    }
-}
-
-impl<T: VCeil, const N: usize> VCeil for Vector<T, N> {
-    #[inline]
-    fn v_ceil(self) -> Self {
-        self.map(T::v_ceil)
-    }
-}
-
-impl<T: VTrunc, const N: usize> VTrunc for Vector<T, N> {
-    #[inline]
-    fn v_trunc(self) -> Self {
-        self.map(T::v_trunc)
-    }
-}
-
-impl<T: Default, const N: usize> Default for Vector<T, N> {
-    #[inline]
-    fn default() -> Self {
-        Self([(); N].map(|_| T::default()))
-    }
-}
-
-impl<T: Clone, const N: usize> From<T> for Vector<T, N> {
+impl<T: Clone, const LEN: usize> From<T> for Vector<T, LEN> {
     #[inline]
     fn from(value: T) -> Self {
-        Self([(); N].map(|_| value.clone()))
+        Vector([(); LEN].map(|_| value.clone()))
     }
 }
 
-impl<T, const N: usize> From<[T; N]> for Vector<T, N> {
+impl<T, const LEN: usize> From<[T; LEN]> for Vector<T, LEN> {
     #[inline]
-    fn from(value: [T; N]) -> Self {
+    fn from(value: [T; LEN]) -> Self {
         Self(value)
     }
 }
 
-impl<T, const N: usize> From<Vector<T, N>> for [T; N] {
+impl<T, const LEN: usize> From<Vector<T, LEN>> for [T; LEN] {
     #[inline]
-    fn from(value: Vector<T, N>) -> Self {
+    fn from(value: Vector<T, LEN>) -> Self {
         value.0
     }
 }
 
-impl<T, const N: usize> AsRef<[T; N]> for Vector<T, N> {
+impl<T, const LEN: usize> AsRef<[T; LEN]> for Vector<T, LEN> {
     #[inline]
-    fn as_ref(&self) -> &[T; N] {
+    fn as_ref(&self) -> &[T; LEN] {
         &self.0
     }
 }
 
-impl<T, const N: usize> AsMut<[T; N]> for Vector<T, N> {
+impl<T, const LEN: usize> AsMut<[T; LEN]> for Vector<T, LEN> {
     #[inline]
-    fn as_mut(&mut self) -> &mut [T; N] {
+    fn as_mut(&mut self) -> &mut [T; LEN] {
         &mut self.0
     }
 }
 
-impl<T, const N: usize> Borrow<[T; N]> for Vector<T, N> {
+impl<T, const LEN: usize> AsRef<[T]> for Vector<T, LEN> {
     #[inline]
-    fn borrow(&self) -> &[T; N] {
+    fn as_ref(&self) -> &[T] {
         &self.0
     }
 }
 
-impl<T, const N: usize> BorrowMut<[T; N]> for Vector<T, N> {
+impl<T, const LEN: usize> AsMut<[T]> for Vector<T, LEN> {
     #[inline]
-    fn borrow_mut(&mut self) -> &mut [T; N] {
+    fn as_mut(&mut self) -> &mut [T] {
         &mut self.0
     }
 }
 
-impl<T, const N: usize> Index<usize> for Vector<T, N> {
-    type Output = T;
+impl<T, const LEN: usize> Borrow<[T; LEN]> for Vector<T, LEN> {
+    #[inline]
+    fn borrow(&self) -> &[T; LEN] {
+        &self.0
+    }
+}
+
+impl<T, const LEN: usize> BorrowMut<[T; LEN]> for Vector<T, LEN> {
+    #[inline]
+    fn borrow_mut(&mut self) -> &mut [T; LEN] {
+        &mut self.0
+    }
+}
+
+impl<T, const LEN: usize> Borrow<[T]> for Vector<T, LEN> {
+    #[inline]
+    fn borrow(&self) -> &[T] {
+        &self.0
+    }
+}
+
+impl<T, const LEN: usize> BorrowMut<[T]> for Vector<T, LEN> {
+    #[inline]
+    fn borrow_mut(&mut self) -> &mut [T] {
+        &mut self.0
+    }
+}
+
+impl<T, const LEN: usize> IntoIterator for Vector<T, LEN> {
+    type Item = T;
+
+    type IntoIter = <[T; LEN] as IntoIterator>::IntoIter;
 
     #[inline]
-    fn index(&self, index: usize) -> &Self::Output {
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl<'a, T, const LEN: usize> IntoIterator for &'a Vector<T, LEN> {
+    type Item = &'a T;
+
+    type IntoIter = <&'a [T; LEN] as IntoIterator>::IntoIter;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
+impl<'a, T, const LEN: usize> IntoIterator for &'a mut Vector<T, LEN> {
+    type Item = &'a mut T;
+
+    type IntoIter = <&'a mut [T; LEN] as IntoIterator>::IntoIter;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter_mut()
+    }
+}
+
+impl<T, I, const LEN: usize> Index<I> for Vector<T, LEN>
+where
+    [T; LEN]: Index<I>,
+{
+    type Output = <[T; LEN] as Index<I>>::Output;
+
+    #[inline]
+    fn index(&self, index: I) -> &Self::Output {
         &self.0[index]
     }
 }
 
-impl<T, const N: usize> IndexMut<usize> for Vector<T, N> {
+impl<T, I, const LEN: usize> IndexMut<I> for Vector<T, LEN>
+where
+    [T; LEN]: IndexMut<I>,
+{
     #[inline]
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+    fn index_mut(&mut self, index: I) -> &mut Self::Output {
         &mut self.0[index]
     }
 }
 
-macro_rules! impl_unary_ops {
-    ($($op_trait:ident $op_func:ident),* $(,)?) => {
-        $(impl<T: std::ops::$op_trait, const N: usize> std::ops::$op_trait for Vector<T, N> {
-            type Output = Vector<T::Output, N>;
+impl<T: Not, const LEN: usize> Not for Vector<T, LEN> {
+    type Output = Vector<T::Output, LEN>;
 
-            #[inline]
-            fn $op_func(self) -> Self::Output {
-                self.map(T::$op_func)
-            }
-        })*
+    #[inline]
+    fn not(self) -> Self::Output {
+        Vector(self.0.map(T::not))
     }
 }
 
-impl_unary_ops!(Neg neg, Not not);
+impl<T: Neg, const LEN: usize> Neg for Vector<T, LEN> {
+    type Output = Vector<T::Output, LEN>;
 
-macro_rules! impl_binary_ops {
-    ($($op_trait:ident $op_func:ident),* $(,)?) => {
-        $(impl<T: std::ops::$op_trait<U>, U, const N: usize> std::ops::$op_trait<Vector<U, N>> for Vector<T, N> {
-            type Output = Vector<T::Output, N>;
-
-            #[inline]
-            fn $op_func(self, other: Vector<U, N>) -> Self::Output {
-                self.map2(other, T::$op_func)
-            }
-        })*
+    #[inline]
+    fn neg(self) -> Self::Output {
+        Vector(self.0.map(T::neg))
     }
 }
 
-impl_binary_ops!(
-    Add add,
-    Sub sub,
-    Mul mul,
-    Div div,
-    Rem rem,
-    BitAnd bitand,
-    BitOr bitor,
-    BitXor bitxor,
-    Shl shl,
-    Shr shr,
-);
+impl<T: Add<U>, U, const LEN: usize> Add<Vector<U, LEN>> for Vector<T, LEN> {
+    type Output = Vector<T::Output, LEN>;
 
-macro_rules! impl_assign_ops {
-    ($($op_trait:ident $op_func:ident),* $(,)?) => {
-        $(impl<T: std::ops::$op_trait<U>, U, const N: usize> std::ops::$op_trait<Vector<U, N>> for Vector<T, N> {
-            #[inline]
-            fn $op_func(&mut self, other: Vector<U, N>) {
-                self.update2(other, T::$op_func)
-            }
-        })*
+    #[inline]
+    fn add(self, rhs: Vector<U, LEN>) -> Self::Output {
+        Vector(self.0.zip(rhs.0).map(|(l, r)| l + r))
     }
 }
 
-impl_assign_ops!(
-    AddAssign add_assign,
-    SubAssign sub_assign,
-    MulAssign mul_assign,
-    DivAssign div_assign,
-    RemAssign rem_assign,
-    BitAndAssign bitand_assign,
-    BitOrAssign bitor_assign,
-    BitXorAssign bitxor_assign,
-    ShlAssign shl_assign,
-    ShrAssign shr_assign,
-);
+impl<T: Sub<U>, U, const LEN: usize> Sub<Vector<U, LEN>> for Vector<T, LEN> {
+    type Output = Vector<T::Output, LEN>;
+
+    #[inline]
+    fn sub(self, rhs: Vector<U, LEN>) -> Self::Output {
+        Vector(self.0.zip(rhs.0).map(|(l, r)| l - r))
+    }
+}
+
+impl<T: Mul<U>, U, const LEN: usize> Mul<Vector<U, LEN>> for Vector<T, LEN> {
+    type Output = Vector<T::Output, LEN>;
+
+    #[inline]
+    fn mul(self, rhs: Vector<U, LEN>) -> Self::Output {
+        Vector(self.0.zip(rhs.0).map(|(l, r)| l * r))
+    }
+}
+
+impl<T: Div<U>, U, const LEN: usize> Div<Vector<U, LEN>> for Vector<T, LEN> {
+    type Output = Vector<T::Output, LEN>;
+
+    #[inline]
+    fn div(self, rhs: Vector<U, LEN>) -> Self::Output {
+        Vector(self.0.zip(rhs.0).map(|(l, r)| l / r))
+    }
+}
+
+impl<T: Rem<U>, U, const LEN: usize> Rem<Vector<U, LEN>> for Vector<T, LEN> {
+    type Output = Vector<T::Output, LEN>;
+
+    #[inline]
+    fn rem(self, rhs: Vector<U, LEN>) -> Self::Output {
+        Vector(self.0.zip(rhs.0).map(|(l, r)| l % r))
+    }
+}
+
+impl<T: BitAnd<U>, U, const LEN: usize> BitAnd<Vector<U, LEN>> for Vector<T, LEN> {
+    type Output = Vector<T::Output, LEN>;
+
+    #[inline]
+    fn bitand(self, rhs: Vector<U, LEN>) -> Self::Output {
+        Vector(self.0.zip(rhs.0).map(|(l, r)| l & r))
+    }
+}
+
+impl<T: BitOr<U>, U, const LEN: usize> BitOr<Vector<U, LEN>> for Vector<T, LEN> {
+    type Output = Vector<T::Output, LEN>;
+
+    #[inline]
+    fn bitor(self, rhs: Vector<U, LEN>) -> Self::Output {
+        Vector(self.0.zip(rhs.0).map(|(l, r)| l | r))
+    }
+}
+
+impl<T: BitXor<U>, U, const LEN: usize> BitXor<Vector<U, LEN>> for Vector<T, LEN> {
+    type Output = Vector<T::Output, LEN>;
+
+    #[inline]
+    fn bitxor(self, rhs: Vector<U, LEN>) -> Self::Output {
+        Vector(self.0.zip(rhs.0).map(|(l, r)| l ^ r))
+    }
+}
+
+impl<T: Shl<U>, U, const LEN: usize> Shl<Vector<U, LEN>> for Vector<T, LEN> {
+    type Output = Vector<T::Output, LEN>;
+
+    #[inline]
+    fn shl(self, rhs: Vector<U, LEN>) -> Self::Output {
+        Vector(self.0.zip(rhs.0).map(|(l, r)| l << r))
+    }
+}
+
+impl<T: Shr<U>, U, const LEN: usize> Shr<Vector<U, LEN>> for Vector<T, LEN> {
+    type Output = Vector<T::Output, LEN>;
+
+    #[inline]
+    fn shr(self, rhs: Vector<U, LEN>) -> Self::Output {
+        Vector(self.0.zip(rhs.0).map(|(l, r)| l >> r))
+    }
+}
+
+impl<T: AddAssign<U>, U, const LEN: usize> AddAssign<Vector<U, LEN>> for Vector<T, LEN> {
+    #[inline]
+    fn add_assign(&mut self, rhs: Vector<U, LEN>) {
+        for (l, r) in self.0.each_mut().zip(rhs.0) {
+            *l += r
+        }
+    }
+}
+
+impl<T: SubAssign<U>, U, const LEN: usize> SubAssign<Vector<U, LEN>> for Vector<T, LEN> {
+    #[inline]
+    fn sub_assign(&mut self, rhs: Vector<U, LEN>) {
+        for (l, r) in self.0.each_mut().zip(rhs.0) {
+            *l -= r
+        }
+    }
+}
+
+impl<T: MulAssign<U>, U, const LEN: usize> MulAssign<Vector<U, LEN>> for Vector<T, LEN> {
+    #[inline]
+    fn mul_assign(&mut self, rhs: Vector<U, LEN>) {
+        for (l, r) in self.0.each_mut().zip(rhs.0) {
+            *l *= r
+        }
+    }
+}
+
+impl<T: DivAssign<U>, U, const LEN: usize> DivAssign<Vector<U, LEN>> for Vector<T, LEN> {
+    #[inline]
+    fn div_assign(&mut self, rhs: Vector<U, LEN>) {
+        for (l, r) in self.0.each_mut().zip(rhs.0) {
+            *l /= r
+        }
+    }
+}
+
+impl<T: RemAssign<U>, U, const LEN: usize> RemAssign<Vector<U, LEN>> for Vector<T, LEN> {
+    #[inline]
+    fn rem_assign(&mut self, rhs: Vector<U, LEN>) {
+        for (l, r) in self.0.each_mut().zip(rhs.0) {
+            *l %= r
+        }
+    }
+}
+
+impl<T: BitAndAssign<U>, U, const LEN: usize> BitAndAssign<Vector<U, LEN>> for Vector<T, LEN> {
+    #[inline]
+    fn bitand_assign(&mut self, rhs: Vector<U, LEN>) {
+        for (l, r) in self.0.each_mut().zip(rhs.0) {
+            *l &= r
+        }
+    }
+}
+
+impl<T: BitOrAssign<U>, U, const LEN: usize> BitOrAssign<Vector<U, LEN>> for Vector<T, LEN> {
+    #[inline]
+    fn bitor_assign(&mut self, rhs: Vector<U, LEN>) {
+        for (l, r) in self.0.each_mut().zip(rhs.0) {
+            *l |= r
+        }
+    }
+}
+
+impl<T: BitXorAssign<U>, U, const LEN: usize> BitXorAssign<Vector<U, LEN>> for Vector<T, LEN> {
+    #[inline]
+    fn bitxor_assign(&mut self, rhs: Vector<U, LEN>) {
+        for (l, r) in self.0.each_mut().zip(rhs.0) {
+            *l ^= r
+        }
+    }
+}
+
+impl<T: ShlAssign<U>, U, const LEN: usize> ShlAssign<Vector<U, LEN>> for Vector<T, LEN> {
+    #[inline]
+    fn shl_assign(&mut self, rhs: Vector<U, LEN>) {
+        for (l, r) in self.0.each_mut().zip(rhs.0) {
+            *l <<= r
+        }
+    }
+}
+
+impl<T: ShrAssign<U>, U, const LEN: usize> ShrAssign<Vector<U, LEN>> for Vector<T, LEN> {
+    #[inline]
+    fn shr_assign(&mut self, rhs: Vector<U, LEN>) {
+        for (l, r) in self.0.each_mut().zip(rhs.0) {
+            *l >>= r
+        }
+    }
+}
