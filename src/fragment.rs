@@ -10,20 +10,28 @@ use cranelift_codegen::ir::{
 use cranelift_frontend::FunctionBuilder;
 use memoffset::{offset_of, offset_of_tuple};
 
-pub unsafe trait Fragment<Input: FragmentValue, Output: FragmentValue> {
+pub unsafe trait Fragment {
+    type Input: FragmentValue;
+
+    type Output: FragmentValue;
+
     fn emit_ir(
         &self,
         builder: &mut FunctionBuilder,
-        inputs: Input::IrValues,
-    ) -> Output::IrValues;
+        inputs: <Self::Input as FragmentValue>::IrValues,
+    ) -> <Self::Output as FragmentValue>::IrValues;
 }
 
-unsafe impl<T: Fragment<Input, Output>, Input: FragmentValue, Output: FragmentValue, const N: usize> Fragment<[Input; N], [Output; N]> for [T; N] {
+unsafe impl<T: Fragment, const N: usize> Fragment for [T; N] {
+    type Input = [T::Input; N];
+
+    type Output = [T::Output; N];
+
     fn emit_ir(
         &self,
         builder: &mut FunctionBuilder,
-        inputs: Input::IrValues,
-    ) -> Output::IrValues {
+        inputs: <Self::Input as FragmentValue>::IrValues,
+    ) -> <Self::Output as FragmentValue>::IrValues {
         self.each_ref()
             .zip(inputs)
             .map(|(f, i)| f.emit_ir(builder, i))
@@ -33,12 +41,16 @@ unsafe impl<T: Fragment<Input, Output>, Input: FragmentValue, Output: FragmentVa
 #[derive(Clone, Copy, Debug)]
 pub struct CommonInput<A, B>(A, B);
 
-unsafe impl<A: Fragment<Input, AOutput>, B: Fragment<Input, BOutput>, Input: FragmentValue, AOutput: FragmentValue, BOutput: FragmentValue> Fragment<Input, (AOutput, BOutput)> for CommonInput<A, B> {
+unsafe impl<A: Fragment, B: Fragment<Input = A::Input>> Fragment for CommonInput<A, B> {
+    type Input = A::Input;
+
+    type Output = (A::Output, B::Output);
+
     fn emit_ir(
         &self,
         builder: &mut FunctionBuilder,
-        inputs: Input::IrValues,
-    ) -> (AOutput::IrValues, BOutput::IrValues) {
+        inputs: <Self::Input as FragmentValue>::IrValues,
+    ) -> <Self::Output as FragmentValue>::IrValues {
         let a = self.0.emit_ir(builder, inputs.clone());
         let b = self.1.emit_ir(builder, inputs);
         (a, b)
