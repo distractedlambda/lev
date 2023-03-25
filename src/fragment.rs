@@ -1,5 +1,4 @@
 use std::{
-    marker::PhantomData,
     mem::{size_of, MaybeUninit},
     ptr::Pointee,
 };
@@ -9,45 +8,27 @@ use cranelift_codegen::ir::{
 };
 use cranelift_frontend::FunctionBuilder;
 use memoffset::{offset_of, offset_of_tuple};
-use sealed::sealed;
 
-pub unsafe trait Fragment {
-    type Input: FragmentValue;
-
+pub unsafe trait Fragment<Input: FragmentValue> {
     type Output: FragmentValue;
 
     fn emit_ir(
         &self,
         builder: &mut FunctionBuilder,
-        inputs: <Self::Input as FragmentValue>::IrValues,
+        inputs: Input::IrValues,
     ) -> <Self::Output as FragmentValue>::IrValues;
 }
 
-macro_rules! phantom_types_struct {
-    ($name:ident<$($typ_param:ident),* $(,)?>) => {
-        #[derive(Debug)]
-        pub struct $name<$($typ_param,)*>(PhantomData<($($typ_param,)*)>);
-
-        impl<$($typ_param,)*> Clone for $name<$($typ_param,)*> {
-            fn clone(&self) -> Self {
-                Self(PhantomData)
-            }
-        }
-
-        impl<$($typ_param,)*> Copy for $name<$($typ_param,)*> {}
-    }
-}
-
-unsafe impl<T: Fragment, const N: usize> Fragment for [T; N] {
-    type Input = [T::Input; N];
-
+unsafe impl<T: Fragment<Input>, Input: FragmentValue, const N: usize> Fragment<[Input; N]>
+    for [T; N]
+{
     type Output = [T::Output; N];
 
     fn emit_ir(
         &self,
         builder: &mut FunctionBuilder,
-        inputs: <Self::Input as FragmentValue>::IrValues,
-    ) -> <Self::Output as FragmentValue>::IrValues {
+        inputs: [Input::IrValues; N],
+    ) -> [<T::Output as FragmentValue>::IrValues; N] {
         self.each_ref()
             .zip(inputs)
             .map(|(f, i)| f.emit_ir(builder, i))
@@ -57,16 +38,19 @@ unsafe impl<T: Fragment, const N: usize> Fragment for [T; N] {
 #[derive(Clone, Copy, Debug)]
 pub struct CommonInput<A, B>(A, B);
 
-unsafe impl<A: Fragment, B: Fragment<Input = A::Input>> Fragment for CommonInput<A, B> {
-    type Input = A::Input;
-
+unsafe impl<A: Fragment<Input>, B: Fragment<Input>, Input: FragmentValue> Fragment<Input>
+    for CommonInput<A, B>
+{
     type Output = (A::Output, B::Output);
 
     fn emit_ir(
         &self,
         builder: &mut FunctionBuilder,
-        inputs: <Self::Input as FragmentValue>::IrValues,
-    ) -> <Self::Output as FragmentValue>::IrValues {
+        inputs: Input::IrValues,
+    ) -> (
+        <A::Output as FragmentValue>::IrValues,
+        <B::Output as FragmentValue>::IrValues,
+    ) {
         let a = self.0.emit_ir(builder, inputs.clone());
         let b = self.1.emit_ir(builder, inputs);
         (a, b)
@@ -76,33 +60,28 @@ unsafe impl<A: Fragment, B: Fragment<Input = A::Input>> Fragment for CommonInput
 #[derive(Clone, Copy, Debug)]
 pub struct Compose<A, B>(A, B);
 
-unsafe impl<A: Fragment, B: Fragment<Input = A::Output>> Fragment for Compose<A, B> {
-    type Input = A::Input;
-
+unsafe impl<A: Fragment<Input>, B: Fragment<A::Output>, Input: FragmentValue> Fragment<Input>
+    for Compose<A, B>
+{
     type Output = B::Output;
 
     fn emit_ir(
         &self,
         builder: &mut FunctionBuilder,
-        inputs: <Self::Input as FragmentValue>::IrValues,
-    ) -> <Self::Output as FragmentValue>::IrValues {
+        inputs: Input::IrValues,
+    ) -> <B::Output as FragmentValue>::IrValues {
         let a = self.0.emit_ir(builder, inputs);
         self.1.emit_ir(builder, a)
     }
 }
 
-phantom_types_struct!(Identity<T>);
+#[derive(Clone, Copy, Debug)]
+pub struct Identity;
 
-unsafe impl<T: FragmentValue> Fragment for Identity<T> {
-    type Input = T;
-
+unsafe impl<T: FragmentValue> Fragment<T> for Identity {
     type Output = T;
 
-    fn emit_ir(
-        &self,
-        _builder: &mut FunctionBuilder,
-        inputs: <Self::Input as FragmentValue>::IrValues,
-    ) -> <Self::Output as FragmentValue>::IrValues {
+    fn emit_ir(&self, _builder: &mut FunctionBuilder, inputs: T::IrValues) -> T::IrValues {
         inputs
     }
 }
@@ -110,16 +89,14 @@ unsafe impl<T: FragmentValue> Fragment for Identity<T> {
 macro_rules! impl_fragment_for_signed_int {
     ($([$typ:ty, $ir_typ:expr])*) => {
         $(
-        unsafe impl Fragment for $typ {
-            type Input = ();
-
+        unsafe impl Fragment<()> for $typ {
             type Output = $typ;
 
             fn emit_ir(
                 &self,
                 builder: &mut FunctionBuilder,
-                _inputs: <Self::Input as FragmentValue>::IrValues,
-            ) -> <Self::Output as FragmentValue>::IrValues {
+                _inputs: (),
+            ) -> Value {
                 builder.ins().iconst($ir_typ, *self as i64)
             }
         }
@@ -138,16 +115,14 @@ impl_fragment_for_signed_int! {
 macro_rules! impl_fragment_for_unsigned_int {
     ($([$typ:ty, $ir_typ:expr])*) => {
         $(
-        unsafe impl Fragment for $typ {
-            type Input = ();
-
+        unsafe impl Fragment<()> for $typ {
             type Output = $typ;
 
             fn emit_ir(
                 &self,
                 builder: &mut FunctionBuilder,
-                _inputs: <Self::Input as FragmentValue>::IrValues,
-            ) -> <Self::Output as FragmentValue>::IrValues {
+                _inputs: (),
+            ) -> Value {
                 builder.ins().iconst($ir_typ, *self as u64 as i64)
             }
         }
@@ -163,45 +138,26 @@ impl_fragment_for_unsigned_int! {
     [usize, ADDRESS_TYPE]
 }
 
-unsafe impl Fragment for f32 {
-    type Input = ();
-
+unsafe impl Fragment<()> for f32 {
     type Output = f32;
 
-    fn emit_ir(
-        &self,
-        builder: &mut FunctionBuilder,
-        _inputs: <Self::Input as FragmentValue>::IrValues,
-    ) -> <Self::Output as FragmentValue>::IrValues {
+    fn emit_ir(&self, builder: &mut FunctionBuilder, _inputs: ()) -> Value {
         builder.ins().f32const(*self)
     }
 }
 
-unsafe impl Fragment for f64 {
-    type Input = ();
-
+unsafe impl Fragment<()> for f64 {
     type Output = f64;
 
-    fn emit_ir(
-        &self,
-        builder: &mut FunctionBuilder,
-        _inputs: <Self::Input as FragmentValue>::IrValues,
-    ) -> <Self::Output as FragmentValue>::IrValues {
+    fn emit_ir(&self, builder: &mut FunctionBuilder, _inputs: ()) -> Value {
         builder.ins().f64const(*self)
     }
 }
 
-unsafe impl Fragment for () {
-    type Input = ();
-
+unsafe impl Fragment<()> for () {
     type Output = ();
 
-    fn emit_ir(
-        &self,
-        _builder: &mut FunctionBuilder,
-        _inputs: <Self::Input as FragmentValue>::IrValues,
-    ) -> <Self::Output as FragmentValue>::IrValues {
-    }
+    fn emit_ir(&self, _builder: &mut FunctionBuilder, _inputs: ()) {}
 }
 
 pub unsafe trait FragmentValue {
@@ -300,7 +256,7 @@ impl_scalar_fragment_value! {
 }
 
 macro_rules! tuple_impl {
-    ($([$typ_param:ident, $idx:tt])*) => {
+    ($([$typ_param:ident, $input_param:ident, $idx:tt])*) => {
         unsafe impl<$($typ_param: FragmentValue,)*> FragmentValue for ($($typ_param,)*) {
             type IrValues = ($($typ_param::IrValues,)*);
 
@@ -330,16 +286,14 @@ macro_rules! tuple_impl {
             }
         }
 
-        unsafe impl<$($typ_param: Fragment,)*> Fragment for ($($typ_param,)*) {
-            type Input = ($($typ_param::Input,)*);
-
+        unsafe impl<$($typ_param: Fragment<$input_param>, $input_param: FragmentValue,)*> Fragment<($($input_param,)*)> for ($($typ_param,)*) {
             type Output = ($($typ_param::Output,)*);
 
             fn emit_ir(
                 &self,
                 builder: &mut FunctionBuilder,
-                inputs: <Self::Input as FragmentValue>::IrValues,
-            ) -> <Self::Output as FragmentValue>::IrValues {
+                inputs: ($(<$input_param as FragmentValue>::IrValues,)*),
+            ) -> ($(<$typ_param::Output as FragmentValue>::IrValues,)*) {
                 ($(self.$idx.emit_ir(builder, inputs.$idx),)*)
             }
         }
@@ -347,9 +301,9 @@ macro_rules! tuple_impl {
 }
 
 macro_rules! tuple_impls_rec {
-    (($($collected:tt)*) [$typ_param:ident, $idx:tt] $($rest:tt)*) => {
-        tuple_impl!($($collected)* [$typ_param, $idx]);
-        tuple_impls_rec!(($($collected)* [$typ_param, $idx]) $($rest)*);
+    (($($collected:tt)*) $first:tt $($rest:tt)*) => {
+        tuple_impl!($($collected)* $first);
+        tuple_impls_rec!(($($collected)* $first) $($rest)*);
     };
 
     (($($collected:tt)*)) => {};
@@ -362,32 +316,32 @@ macro_rules! tuple_impls {
 }
 
 tuple_impls! {
-    [A, 0]
-    [B, 1]
-    [C, 2]
-    [D, 3]
-    [E, 4]
-    [F, 5]
-    [G, 6]
-    [H, 7]
-    [I, 8]
-    [J, 9]
-    [K, 10]
-    [L, 11]
-    [M, 12]
-    [N, 13]
-    [O, 14]
-    [P, 15]
-    [Q, 16]
-    [R, 17]
-    [S, 18]
-    [T, 19]
-    [U, 20]
-    [V, 21]
-    [W, 22]
-    [X, 23]
-    [Y, 24]
-    [Z, 25]
+    [A, AInput, 0]
+    [B, BInput, 1]
+    [C, CInput, 2]
+    [D, DInput, 3]
+    [E, EInput, 4]
+    [F, FInput, 5]
+    [G, GInput, 6]
+    [H, HInput, 7]
+    [I, IInput, 8]
+    [J, JInput, 9]
+    [K, KInput, 10]
+    [L, LInput, 11]
+    [M, MInput, 12]
+    [N, NInput, 13]
+    [O, OInput, 14]
+    [P, PInput, 15]
+    [Q, QInput, 16]
+    [R, RInput, 17]
+    [S, SInput, 18]
+    [T, TInput, 19]
+    [U, UInput, 20]
+    [V, VInput, 21]
+    [W, WInput, 22]
+    [X, XInput, 23]
+    [Y, YInput, 24]
+    [Z, ZInput, 25]
 }
 
 unsafe impl<T: FragmentValue, const N: usize> FragmentValue for [T; N] {
