@@ -1,141 +1,19 @@
 use std::{
     mem::{size_of, MaybeUninit},
     ptr::Pointee,
+    simd::Simd,
 };
 
-use cranelift_codegen::ir::{
-    immediates::Offset32, types, Block, InstBuilder, MemFlags, Type, Value,
-};
+use cranelift_codegen::ir::{immediates::Offset32, types, Block, InstBuilder, MemFlags, Value};
 use cranelift_frontend::FunctionBuilder;
 use memoffset::{offset_of, offset_of_tuple};
 
-pub unsafe trait Fragment<Input: FragmentValue> {
-    type Output: FragmentValue;
+use super::{Fragment, FragmentValue, ADDRESS_TYPE};
 
-    fn emit_ir(
-        &self,
-        builder: &mut FunctionBuilder,
-        inputs: Input::IrValues,
-    ) -> <Self::Output as FragmentValue>::IrValues;
-}
+unsafe impl Fragment<()> for () {
+    type Output = ();
 
-unsafe impl<T: Fragment<Input>, Input: FragmentValue, const N: usize> Fragment<[Input; N]>
-    for [T; N]
-{
-    type Output = [T::Output; N];
-
-    fn emit_ir(
-        &self,
-        builder: &mut FunctionBuilder,
-        inputs: [Input::IrValues; N],
-    ) -> [<T::Output as FragmentValue>::IrValues; N] {
-        self.each_ref()
-            .zip(inputs)
-            .map(|(f, i)| f.emit_ir(builder, i))
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct CommonInput<A, B>(A, B);
-
-unsafe impl<A: Fragment<Input>, B: Fragment<Input>, Input: FragmentValue> Fragment<Input>
-    for CommonInput<A, B>
-{
-    type Output = (A::Output, B::Output);
-
-    fn emit_ir(
-        &self,
-        builder: &mut FunctionBuilder,
-        inputs: Input::IrValues,
-    ) -> (
-        <A::Output as FragmentValue>::IrValues,
-        <B::Output as FragmentValue>::IrValues,
-    ) {
-        let a = self.0.emit_ir(builder, inputs.clone());
-        let b = self.1.emit_ir(builder, inputs);
-        (a, b)
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct Compose<A, B>(A, B);
-
-unsafe impl<A: Fragment<Input>, B: Fragment<A::Output>, Input: FragmentValue> Fragment<Input>
-    for Compose<A, B>
-{
-    type Output = B::Output;
-
-    fn emit_ir(
-        &self,
-        builder: &mut FunctionBuilder,
-        inputs: Input::IrValues,
-    ) -> <B::Output as FragmentValue>::IrValues {
-        let a = self.0.emit_ir(builder, inputs);
-        self.1.emit_ir(builder, a)
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct Identity;
-
-unsafe impl<T: FragmentValue> Fragment<T> for Identity {
-    type Output = T;
-
-    fn emit_ir(&self, _builder: &mut FunctionBuilder, inputs: T::IrValues) -> T::IrValues {
-        inputs
-    }
-}
-
-macro_rules! impl_fragment_for_signed_int {
-    ($([$typ:ty, $ir_typ:expr])*) => {
-        $(
-        unsafe impl Fragment<()> for $typ {
-            type Output = $typ;
-
-            fn emit_ir(
-                &self,
-                builder: &mut FunctionBuilder,
-                _inputs: (),
-            ) -> Value {
-                builder.ins().iconst($ir_typ, *self as i64)
-            }
-        }
-        )*
-    }
-}
-
-impl_fragment_for_signed_int! {
-    [i8, types::I8]
-    [i16, types::I16]
-    [i32, types::I32]
-    [i64, types::I64]
-    [isize, ADDRESS_TYPE]
-}
-
-macro_rules! impl_fragment_for_unsigned_int {
-    ($([$typ:ty, $ir_typ:expr])*) => {
-        $(
-        unsafe impl Fragment<()> for $typ {
-            type Output = $typ;
-
-            fn emit_ir(
-                &self,
-                builder: &mut FunctionBuilder,
-                _inputs: (),
-            ) -> Value {
-                builder.ins().iconst($ir_typ, *self as u64 as i64)
-            }
-        }
-        )*
-    }
-}
-
-impl_fragment_for_unsigned_int! {
-    [u8, types::I8]
-    [u16, types::I16]
-    [u32, types::I32]
-    [u64, types::I64]
-    [usize, ADDRESS_TYPE]
+    fn emit_ir(&self, _builder: &mut FunctionBuilder, _inputs: ()) {}
 }
 
 unsafe impl Fragment<()> for f32 {
@@ -154,28 +32,20 @@ unsafe impl Fragment<()> for f64 {
     }
 }
 
-unsafe impl Fragment<()> for () {
-    type Output = ();
+unsafe impl<T: Fragment<Input>, Input: FragmentValue, const N: usize> Fragment<[Input; N]>
+    for [T; N]
+{
+    type Output = [T::Output; N];
 
-    fn emit_ir(&self, _builder: &mut FunctionBuilder, _inputs: ()) {}
-}
-
-pub unsafe trait FragmentValue {
-    type IrValues: Clone;
-
-    fn append_block_params(builder: &mut FunctionBuilder, block: Block) -> Self::IrValues;
-
-    fn unpack_ir_values(values: Self::IrValues, dst: &mut impl Extend<Value>);
-
-    fn emit_load(builder: &mut FunctionBuilder, address: Value, offset: Offset32)
-        -> Self::IrValues;
-
-    fn emit_store(
+    fn emit_ir(
+        &self,
         builder: &mut FunctionBuilder,
-        address: Value,
-        values: Self::IrValues,
-        offset: Offset32,
-    );
+        inputs: [Input::IrValues; N],
+    ) -> [<T::Output as FragmentValue>::IrValues; N] {
+        self.each_ref()
+            .zip(inputs)
+            .map(|(f, i)| f.emit_ir(builder, i))
+    }
 }
 
 unsafe impl FragmentValue for () {
@@ -201,9 +71,104 @@ unsafe impl FragmentValue for () {
     }
 }
 
-macro_rules! impl_scalar_fragment_value {
+unsafe impl<T: FragmentValue, const N: usize> FragmentValue for [T; N] {
+    type IrValues = [T::IrValues; N];
+
+    fn append_block_params(builder: &mut FunctionBuilder, block: Block) -> Self::IrValues {
+        new_array_by(|_| T::append_block_params(builder, block))
+    }
+
+    fn unpack_ir_values(values: Self::IrValues, dst: &mut impl Extend<Value>) {
+        for v in values {
+            T::unpack_ir_values(v, dst);
+        }
+    }
+
+    fn emit_load(
+        builder: &mut FunctionBuilder,
+        address: Value,
+        offset: Offset32,
+    ) -> Self::IrValues {
+        new_array_by(|i| {
+            T::emit_load(
+                builder,
+                address,
+                combine_offset(offset, i.checked_mul(size_of::<T>()).unwrap()),
+            )
+        })
+    }
+
+    fn emit_store(
+        builder: &mut FunctionBuilder,
+        address: Value,
+        values: Self::IrValues,
+        offset: Offset32,
+    ) {
+        for (i, v) in values.into_iter().enumerate() {
+            T::emit_store(
+                builder,
+                address,
+                v,
+                combine_offset(offset, i.checked_mul(size_of::<T>()).unwrap()),
+            )
+        }
+    }
+}
+
+macro_rules! signed_int_fragment_impls {
     ($([$typ:ty, $ir_typ:expr])*) => {
         $(
+        unsafe impl Fragment<()> for $typ {
+            type Output = $typ;
+
+            fn emit_ir(
+                &self,
+                builder: &mut FunctionBuilder,
+                _inputs: (),
+            ) -> Value {
+                builder.ins().iconst($ir_typ, *self as i64)
+            }
+        }
+        )*
+    }
+}
+
+signed_int_fragment_impls! {
+    [i8, types::I8]
+    [i16, types::I16]
+    [i32, types::I32]
+    [i64, types::I64]
+    [isize, ADDRESS_TYPE]
+}
+
+macro_rules! unsigned_int_fragment_impls {
+    ($([$typ:ty, $ir_typ:expr])*) => {
+        $(
+        unsafe impl Fragment<()> for $typ {
+            type Output = $typ;
+
+            fn emit_ir(
+                &self,
+                builder: &mut FunctionBuilder,
+                _inputs: (),
+            ) -> Value {
+                builder.ins().iconst($ir_typ, *self as u64 as i64)
+            }
+        }
+        )*
+    }
+}
+
+unsigned_int_fragment_impls! {
+    [u8, types::I8]
+    [u16, types::I16]
+    [u32, types::I32]
+    [u64, types::I64]
+    [usize, ADDRESS_TYPE]
+}
+
+macro_rules! primitive_value_impl {
+    ($typ:ty, $ir_typ:expr) => {
         unsafe impl FragmentValue for $typ {
             type IrValues = Value;
 
@@ -236,11 +201,25 @@ macro_rules! impl_scalar_fragment_value {
                     .store(MemFlags::trusted(), values, address, offset);
             }
         }
+    };
+}
+
+macro_rules! primitive_value_impls {
+    ($([$typ:ty, $ir_typ:expr])*) => {
+        $(
+        primitive_value_impl!($typ, $ir_typ);
+        primitive_value_impl!(Simd<$typ, 1>, $ir_typ.by(1).unwrap());
+        primitive_value_impl!(Simd<$typ, 2>, $ir_typ.by(2).unwrap());
+        primitive_value_impl!(Simd<$typ, 4>, $ir_typ.by(4).unwrap());
+        primitive_value_impl!(Simd<$typ, 8>, $ir_typ.by(8).unwrap());
+        primitive_value_impl!(Simd<$typ, 16>, $ir_typ.by(16).unwrap());
+        primitive_value_impl!(Simd<$typ, 32>, $ir_typ.by(32).unwrap());
+        primitive_value_impl!(Simd<$typ, 64>, $ir_typ.by(64).unwrap());
         )*
     }
 }
 
-impl_scalar_fragment_value! {
+primitive_value_impls! {
     [i8, types::I8]
     [i16, types::I16]
     [i32, types::I32]
@@ -344,51 +323,7 @@ tuple_impls! {
     [Z, ZInput, 25]
 }
 
-unsafe impl<T: FragmentValue, const N: usize> FragmentValue for [T; N] {
-    type IrValues = [T::IrValues; N];
-
-    fn append_block_params(builder: &mut FunctionBuilder, block: Block) -> Self::IrValues {
-        new_array_by(|_| T::append_block_params(builder, block))
-    }
-
-    fn unpack_ir_values(values: Self::IrValues, dst: &mut impl Extend<Value>) {
-        for v in values {
-            T::unpack_ir_values(v, dst);
-        }
-    }
-
-    fn emit_load(
-        builder: &mut FunctionBuilder,
-        address: Value,
-        offset: Offset32,
-    ) -> Self::IrValues {
-        new_array_by(|i| {
-            T::emit_load(
-                builder,
-                address,
-                combine_offset(offset, i.checked_mul(size_of::<T>()).unwrap()),
-            )
-        })
-    }
-
-    fn emit_store(
-        builder: &mut FunctionBuilder,
-        address: Value,
-        values: Self::IrValues,
-        offset: Offset32,
-    ) {
-        for (i, v) in values.into_iter().enumerate() {
-            T::emit_store(
-                builder,
-                address,
-                v,
-                combine_offset(offset, i.checked_mul(size_of::<T>()).unwrap()),
-            )
-        }
-    }
-}
-
-macro_rules! impl_pointer_fragment_value {
+macro_rules! pointer_fragment_impls {
     ($([$typ_var:ident, $typ:ty])*) => {
         $(
         unsafe impl<$typ_var: ?Sized> FragmentValue for $typ
@@ -426,42 +361,22 @@ macro_rules! impl_pointer_fragment_value {
     }
 }
 
-impl_pointer_fragment_value! {
+pointer_fragment_impls! {
     [T, &T]
     [T, &mut T]
     [T, *const T]
     [T, *mut T]
 }
 
-#[cfg(target_pointer_width = "32")]
-const ADDRESS_TYPE: Type = types::I32;
-
-#[cfg(target_pointer_width = "64")]
-const ADDRESS_TYPE: Type = types::I64;
+fn combine_offset(base: Offset32, adjustment: usize) -> Offset32 {
+    base.try_add_i64(adjustment.try_into().unwrap()).unwrap()
+}
 
 /// Copied from core::ptr::metadata sources
 #[repr(C)]
 struct PtrComponents<T: ?Sized> {
     data_address: *const (),
     metadata: <T as Pointee>::Metadata,
-}
-
-#[inline]
-fn combine_offset(base: Offset32, adjustment: usize) -> Offset32 {
-    base.try_add_i64(adjustment.try_into().unwrap()).unwrap()
-}
-
-fn new_array_by<T, const N: usize>(mut f: impl FnMut(usize) -> T) -> [T; N] {
-    unsafe {
-        let mut result = MaybeUninit::uninit_array();
-
-        for i in 0..N {
-            // TODO: drop things on panic
-            result[i].write(f(i));
-        }
-
-        MaybeUninit::array_assume_init(result)
-    }
 }
 
 type PointerIrValues<T> = (Value, <<T as Pointee>::Metadata as FragmentValue>::IrValues);
@@ -530,4 +445,17 @@ fn emit_pointer_store<T: ?Sized>(
         values.1,
         combine_offset(offset, offset_of!(PtrComponents<T>, metadata)),
     );
+}
+
+fn new_array_by<T, const N: usize>(mut f: impl FnMut(usize) -> T) -> [T; N] {
+    unsafe {
+        let mut result = MaybeUninit::uninit_array();
+
+        for i in 0..N {
+            // TODO: drop things on panic
+            result[i].write(f(i));
+        }
+
+        MaybeUninit::array_assume_init(result)
+    }
 }
