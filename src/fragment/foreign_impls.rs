@@ -71,6 +71,40 @@ unsafe impl FragmentValue for () {
     }
 }
 
+// FIXME: ground these assumptions about booleans in something
+unsafe impl FragmentValue for bool {
+    type IrValues = Value;
+
+    fn append_block_params(builder: &mut FunctionBuilder, block: Block) -> Self::IrValues {
+        builder.append_block_param(block, types::I8)
+    }
+
+    fn unpack_ir_values(values: Self::IrValues, dst: &mut impl Extend<Value>) {
+        dst.extend_one(values)
+    }
+
+    fn emit_load(
+        builder: &mut FunctionBuilder,
+        address: Value,
+        offset: Offset32,
+    ) -> Self::IrValues {
+        builder
+            .ins()
+            .load(types::I8, MemFlags::trusted(), address, offset)
+    }
+
+    fn emit_store(
+        builder: &mut FunctionBuilder,
+        address: Value,
+        values: Self::IrValues,
+        offset: Offset32,
+    ) {
+        builder
+            .ins()
+            .store(MemFlags::trusted(), values, address, offset);
+    }
+}
+
 unsafe impl<T: FragmentValue, const N: usize> FragmentValue for [T; N] {
     type IrValues = [T::IrValues; N];
 
@@ -326,7 +360,7 @@ tuple_impls! {
 macro_rules! pointer_fragment_impls {
     ($([$typ_var:ident, $typ:ty])*) => {
         $(
-        unsafe impl<$typ_var: ?Sized> FragmentValue for $typ
+        unsafe impl<$typ_var: ?Sized + 'static> FragmentValue for $typ
         where
             <$typ_var as Pointee>::Metadata: FragmentValue,
         {
@@ -362,8 +396,7 @@ macro_rules! pointer_fragment_impls {
 }
 
 pointer_fragment_impls! {
-    [T, &T]
-    [T, &mut T]
+    [T, &'static T]
     [T, *const T]
     [T, *mut T]
 }

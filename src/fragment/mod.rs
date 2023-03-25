@@ -14,7 +14,7 @@ pub unsafe trait Fragment<Input: FragmentValue> {
     ) -> <Self::Output as FragmentValue>::IrValues;
 }
 
-pub unsafe trait FragmentValue {
+pub unsafe trait FragmentValue: Copy + 'static {
     type IrValues: Clone;
 
     fn append_block_params(builder: &mut FunctionBuilder, block: Block) -> Self::IrValues;

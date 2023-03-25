@@ -1,7 +1,9 @@
+use std::simd::Simd;
+
 use cranelift_codegen::ir::{InstBuilder, Value};
 use cranelift_frontend::FunctionBuilder;
+
 use super::Fragment;
-use std::simd::Simd;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Add;
@@ -48,7 +50,7 @@ macro_rules! binary_op_impl {
                 builder.ins().$ins_func(inputs.0, inputs.1)
             }
         }
-    }
+    };
 }
 
 macro_rules! vectorized_binary_op_impls {
@@ -82,6 +84,10 @@ vectorized_binary_op_impls! {
         fmul [f32, f64]
     }
 
+    Div {
+        fdiv [f32, f64]
+    }
+
     BitAnd {
         band [i8, i16, i32, i64, isize, u8, u16, u32, u64, usize]
     }
@@ -112,5 +118,23 @@ vectorized_binary_op_impls! {
 
     FMax {
         fmax [f32, f64]
+    }
+}
+
+macro_rules! scalar_binary_op_impls {
+    ($($op_typ:ty { $($ins_func:ident [$($val_typ:ty),* $(,)?])* })*) => {
+        $($($(binary_op_impl!($op_typ, $val_typ, $ins_func);)*)*)*
+    }
+}
+
+scalar_binary_op_impls! {
+    Div {
+        sdiv [i8, i16, i32, i64, isize]
+        udiv [u8, u16, u32, u64, usize]
+    }
+
+    Rem {
+        srem [i8, i16, i32, i64, isize]
+        urem [u8, u16, u32, u64, usize]
     }
 }
