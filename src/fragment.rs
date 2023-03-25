@@ -9,6 +9,7 @@ use cranelift_codegen::ir::{
 };
 use cranelift_frontend::FunctionBuilder;
 use memoffset::{offset_of, offset_of_tuple};
+use sealed::sealed;
 
 pub unsafe trait Fragment {
     type Input: FragmentValue;
@@ -20,6 +21,21 @@ pub unsafe trait Fragment {
         builder: &mut FunctionBuilder,
         inputs: <Self::Input as FragmentValue>::IrValues,
     ) -> <Self::Output as FragmentValue>::IrValues;
+}
+
+macro_rules! phantom_types_struct {
+    ($name:ident<$($typ_param:ident),* $(,)?>) => {
+        #[derive(Debug)]
+        pub struct $name<$($typ_param,)*>(PhantomData<($($typ_param,)*)>);
+
+        impl<$($typ_param,)*> Clone for $name<$($typ_param,)*> {
+            fn clone(&self) -> Self {
+                Self(PhantomData)
+            }
+        }
+
+        impl<$($typ_param,)*> Copy for $name<$($typ_param,)*> {}
+    }
 }
 
 unsafe impl<T: Fragment, const N: usize> Fragment for [T; N] {
@@ -75,16 +91,7 @@ unsafe impl<A: Fragment, B: Fragment<Input = A::Output>> Fragment for Compose<A,
     }
 }
 
-#[derive(Debug)]
-pub struct Identity<T>(PhantomData<T>);
-
-impl<T> Clone for Identity<T> {
-    fn clone(&self) -> Self {
-        Identity(PhantomData)
-    }
-}
-
-impl<T> Copy for Identity<T> {}
+phantom_types_struct!(Identity<T>);
 
 unsafe impl<T: FragmentValue> Fragment for Identity<T> {
     type Input = T;
