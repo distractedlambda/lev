@@ -4,6 +4,7 @@ mod ops;
 
 use cranelift_codegen::ir::{immediates::Offset32, types, Block, MemFlags, Type, Value};
 use cranelift_frontend::FunctionBuilder;
+pub use jit::{CompiledFragment, CompiledSafeFragment, CompiledUnsafeFragment, FragmentCompiler};
 pub use ops::{
     Abs, Add, BitAnd, BitOr, BitXor, Ceil, CopySign, CountLeadingOneBits, CountLeadingZeroBits,
     CountOneBits, CountTrailingZeroBits, Div, FMax, FMin, Floor, Max, Min, Mul, Nearest, Neg, Not,
