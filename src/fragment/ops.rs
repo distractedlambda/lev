@@ -1,4 +1,4 @@
-use std::simd::Simd;
+use std::simd::{LaneCount, Simd, SupportedLaneCount};
 
 use cranelift_codegen::ir::{InstBuilder, Value};
 use cranelift_frontend::FunctionBuilder;
@@ -39,13 +39,13 @@ op_decls!(
     Rem,
     ReverseBits,
     ReverseBytes,
+    RotateLeft,
+    RotateRight,
+    Shl,
+    Shr,
     Sqrt,
     Sub,
     Trunc,
-    Shl,
-    Shr,
-    RotateLeft,
-    RotateRight,
 );
 
 macro_rules! unary_op_impl {
@@ -60,17 +60,26 @@ macro_rules! unary_op_impl {
     };
 }
 
+macro_rules! simd_unary_op_impl {
+    ($op_typ:ty, $val_typ:ty, $ins_func:ident) => {
+        unsafe impl<const LANES: usize> Fragment<Simd<$val_typ, LANES>> for $op_typ
+        where
+            LaneCount<LANES>: SupportedLaneCount,
+        {
+            type Output = Simd<$val_typ, LANES>;
+
+            fn emit_ir(&self, builder: &mut FunctionBuilder, inputs: Value) -> Value {
+                builder.ins().$ins_func(inputs)
+            }
+        }
+    };
+}
+
 macro_rules! vectorized_unary_op_impls {
     ($($op_typ:ty { $($ins_func:ident [$($val_typ:ty),* $(,)?])* })*) => {
         $($($(
         unary_op_impl!($op_typ, $val_typ, $ins_func);
-        unary_op_impl!($op_typ, Simd<$val_typ, 1>, $ins_func);
-        unary_op_impl!($op_typ, Simd<$val_typ, 2>, $ins_func);
-        unary_op_impl!($op_typ, Simd<$val_typ, 4>, $ins_func);
-        unary_op_impl!($op_typ, Simd<$val_typ, 8>, $ins_func);
-        unary_op_impl!($op_typ, Simd<$val_typ, 16>, $ins_func);
-        unary_op_impl!($op_typ, Simd<$val_typ, 32>, $ins_func);
-        unary_op_impl!($op_typ, Simd<$val_typ, 64>, $ins_func);
+        simd_unary_op_impl!($op_typ, $val_typ, $ins_func);
         )*)*)*
     }
 }
@@ -159,17 +168,27 @@ macro_rules! binary_op_impl {
     };
 }
 
+macro_rules! simd_binary_op_impl {
+    ($op_typ:ty, $val_typ:ty, $ins_func:ident) => {
+        unsafe impl<const LANES: usize> Fragment<(Simd<$val_typ, LANES>, Simd<$val_typ, LANES>)>
+            for $op_typ
+        where
+            LaneCount<LANES>: SupportedLaneCount,
+        {
+            type Output = Simd<$val_typ, LANES>;
+
+            fn emit_ir(&self, builder: &mut FunctionBuilder, inputs: (Value, Value)) -> Value {
+                builder.ins().$ins_func(inputs.0, inputs.1)
+            }
+        }
+    };
+}
+
 macro_rules! vectorized_binary_op_impls {
     ($($op_typ:ty { $($ins_func:ident [$($val_typ:ty),* $(,)?])* })*) => {
         $($($(
         binary_op_impl!($op_typ, $val_typ, $ins_func);
-        binary_op_impl!($op_typ, Simd<$val_typ, 1>, $ins_func);
-        binary_op_impl!($op_typ, Simd<$val_typ, 2>, $ins_func);
-        binary_op_impl!($op_typ, Simd<$val_typ, 4>, $ins_func);
-        binary_op_impl!($op_typ, Simd<$val_typ, 8>, $ins_func);
-        binary_op_impl!($op_typ, Simd<$val_typ, 16>, $ins_func);
-        binary_op_impl!($op_typ, Simd<$val_typ, 32>, $ins_func);
-        binary_op_impl!($op_typ, Simd<$val_typ, 64>, $ins_func);
+        simd_binary_op_impl!($op_typ, $val_typ, $ins_func);
         )*)*)*
     }
 }
@@ -270,11 +289,23 @@ macro_rules! shift_op_impl {
                 builder.ins().$ins_func(inputs.0, inputs.1)
             }
         }
-    }
+
+        unsafe impl<const LANES: usize> Fragment<(Simd<$lhs_typ, LANES>, $rhs_typ)> for $op_typ
+        where
+            LaneCount<LANES>: SupportedLaneCount,
+        {
+            type Output = Simd<$lhs_typ, LANES>;
+
+            fn emit_ir(&self, builder: &mut FunctionBuilder, inputs: (Value, Value)) -> Value {
+                builder.ins().$ins_func(inputs.0, inputs.1)
+            }
+        }
+    };
 }
 
-macro_rules! shift_op_impls_helper {
-    ($op_typ:ty, $lhs_typ:ty, $ins_func:ident) => {
+macro_rules! shift_op_impls {
+    ($($op_typ:ty { $($ins_func:ident [$($lhs_typ:ty),* $(,)?])* })*) => {
+        $($($(
         shift_op_impl!($op_typ, $lhs_typ, u8, $ins_func);
         shift_op_impl!($op_typ, $lhs_typ, u16, $ins_func);
         shift_op_impl!($op_typ, $lhs_typ, u32, $ins_func);
@@ -285,20 +316,6 @@ macro_rules! shift_op_impls_helper {
         shift_op_impl!($op_typ, $lhs_typ, i32, $ins_func);
         shift_op_impl!($op_typ, $lhs_typ, i64, $ins_func);
         shift_op_impl!($op_typ, $lhs_typ, isize, $ins_func);
-    }
-}
-
-macro_rules! shift_op_impls {
-    ($($op_typ:ty { $($ins_func:ident [$($lhs_typ:ty),* $(,)?])* })*) => {
-        $($($(
-        shift_op_impls_helper!($op_typ, $lhs_typ, $ins_func);
-        shift_op_impls_helper!($op_typ, Simd<$lhs_typ, 1>, $ins_func);
-        shift_op_impls_helper!($op_typ, Simd<$lhs_typ, 2>, $ins_func);
-        shift_op_impls_helper!($op_typ, Simd<$lhs_typ, 4>, $ins_func);
-        shift_op_impls_helper!($op_typ, Simd<$lhs_typ, 8>, $ins_func);
-        shift_op_impls_helper!($op_typ, Simd<$lhs_typ, 16>, $ins_func);
-        shift_op_impls_helper!($op_typ, Simd<$lhs_typ, 32>, $ins_func);
-        shift_op_impls_helper!($op_typ, Simd<$lhs_typ, 64>, $ins_func);
         )*)*)*
     }
 }

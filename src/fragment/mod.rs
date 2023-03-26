@@ -1,7 +1,7 @@
 mod foreign_impls;
 mod ops;
 
-use cranelift_codegen::ir::{immediates::Offset32, types, Block, Type, Value};
+use cranelift_codegen::ir::{immediates::Offset32, types, Block, MemFlags, Type, Value};
 use cranelift_frontend::FunctionBuilder;
 
 pub unsafe trait Fragment<Input: FragmentValue> {
@@ -21,15 +21,24 @@ pub unsafe trait FragmentValue: Copy + 'static {
 
     fn unpack_ir_values(values: Self::IrValues, dst: &mut impl Extend<Value>);
 
-    fn emit_load(builder: &mut FunctionBuilder, address: Value, offset: Offset32)
-        -> Self::IrValues;
+    fn emit_load(
+        builder: &mut FunctionBuilder,
+        flags: MemFlags,
+        address: Value,
+        offset: Offset32,
+    ) -> Self::IrValues;
 
     fn emit_store(
         builder: &mut FunctionBuilder,
+        flags: MemFlags,
         address: Value,
         values: Self::IrValues,
         offset: Offset32,
     );
+}
+
+pub unsafe trait PrimitiveValue: Fragment<(), Output = Self> + FragmentValue<IrValues = Value> {
+    fn ir_type() -> Type;
 }
 
 #[derive(Clone, Copy, Debug)]

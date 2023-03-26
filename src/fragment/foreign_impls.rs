@@ -1,19 +1,41 @@
 use std::{
     mem::{size_of, MaybeUninit},
     ptr::Pointee,
-    simd::Simd,
+    simd::{LaneCount, Simd, SimdElement, SupportedLaneCount},
 };
 
-use cranelift_codegen::ir::{immediates::Offset32, types, Block, InstBuilder, MemFlags, Value};
+use cranelift_codegen::ir::{
+    immediates::{Imm64, Offset32},
+    types, Block, InstBuilder, MemFlags, Type, Value,
+};
 use cranelift_frontend::FunctionBuilder;
 use memoffset::{offset_of, offset_of_tuple};
 
-use super::{Fragment, FragmentValue, ADDRESS_TYPE};
+use super::{Fragment, FragmentValue, PrimitiveValue, ADDRESS_TYPE};
+
+unsafe impl<T: SimdElement + PrimitiveValue, const LANES: usize> PrimitiveValue for Simd<T, LANES>
+where
+    LaneCount<LANES>: SupportedLaneCount,
+{
+    fn ir_type() -> Type {
+        T::ir_type().by(LANES.try_into().unwrap()).unwrap()
+    }
+}
 
 unsafe impl Fragment<()> for () {
     type Output = ();
 
     fn emit_ir(&self, _builder: &mut FunctionBuilder, _inputs: ()) {}
+}
+
+unsafe impl Fragment<()> for bool {
+    type Output = bool;
+
+    fn emit_ir(&self, builder: &mut FunctionBuilder, _inputs: ()) -> Value {
+        builder
+            .ins()
+            .iconst(types::I8, if *self { Imm64::new(1) } else { Imm64::new(0) })
+    }
 }
 
 unsafe impl Fragment<()> for f32 {
@@ -48,6 +70,31 @@ unsafe impl<T: Fragment<Input>, Input: FragmentValue, const N: usize> Fragment<[
     }
 }
 
+unsafe impl<T: PrimitiveValue + SimdElement, const LANES: usize> Fragment<()> for Simd<T, LANES>
+where
+    LaneCount<LANES>: SupportedLaneCount,
+{
+    type Output = Self;
+
+    fn emit_ir(&self, builder: &mut FunctionBuilder, _inputs: ()) -> Value {
+        let first = self[0].emit_ir(builder, ());
+
+        let mut vector = builder
+            .ins()
+            .scalar_to_vector(<Self as PrimitiveValue>::ir_type(), first);
+
+        for i in 1..LANES {
+            let element = self[i].emit_ir(builder, ());
+
+            vector = builder
+                .ins()
+                .insertlane(vector, element, u8::try_from(i).unwrap());
+        }
+
+        vector
+    }
+}
+
 unsafe impl FragmentValue for () {
     type IrValues = ();
 
@@ -57,51 +104,19 @@ unsafe impl FragmentValue for () {
 
     fn emit_load(
         _builder: &mut FunctionBuilder,
+        _flags: MemFlags,
         _address: Value,
         _offset: Offset32,
-    ) -> Self::IrValues {
+    ) {
     }
 
     fn emit_store(
         _builder: &mut FunctionBuilder,
+        _flags: MemFlags,
         _address: Value,
         _values: Self::IrValues,
         _offset: Offset32,
     ) {
-    }
-}
-
-// FIXME: ground these assumptions about booleans in something
-unsafe impl FragmentValue for bool {
-    type IrValues = Value;
-
-    fn append_block_params(builder: &mut FunctionBuilder, block: Block) -> Self::IrValues {
-        builder.append_block_param(block, types::I8)
-    }
-
-    fn unpack_ir_values(values: Self::IrValues, dst: &mut impl Extend<Value>) {
-        dst.extend_one(values)
-    }
-
-    fn emit_load(
-        builder: &mut FunctionBuilder,
-        address: Value,
-        offset: Offset32,
-    ) -> Self::IrValues {
-        builder
-            .ins()
-            .load(types::I8, MemFlags::trusted(), address, offset)
-    }
-
-    fn emit_store(
-        builder: &mut FunctionBuilder,
-        address: Value,
-        values: Self::IrValues,
-        offset: Offset32,
-    ) {
-        builder
-            .ins()
-            .store(MemFlags::trusted(), values, address, offset);
     }
 }
 
@@ -120,12 +135,14 @@ unsafe impl<T: FragmentValue, const N: usize> FragmentValue for [T; N] {
 
     fn emit_load(
         builder: &mut FunctionBuilder,
+        flags: MemFlags,
         address: Value,
         offset: Offset32,
     ) -> Self::IrValues {
         new_array_by(|i| {
             T::emit_load(
                 builder,
+                flags,
                 address,
                 combine_offset(offset, i.checked_mul(size_of::<T>()).unwrap()),
             )
@@ -134,6 +151,7 @@ unsafe impl<T: FragmentValue, const N: usize> FragmentValue for [T; N] {
 
     fn emit_store(
         builder: &mut FunctionBuilder,
+        flags: MemFlags,
         address: Value,
         values: Self::IrValues,
         offset: Offset32,
@@ -141,6 +159,7 @@ unsafe impl<T: FragmentValue, const N: usize> FragmentValue for [T; N] {
         for (i, v) in values.into_iter().enumerate() {
             T::emit_store(
                 builder,
+                flags,
                 address,
                 v,
                 combine_offset(offset, i.checked_mul(size_of::<T>()).unwrap()),
@@ -149,8 +168,42 @@ unsafe impl<T: FragmentValue, const N: usize> FragmentValue for [T; N] {
     }
 }
 
+unsafe impl<T: PrimitiveValue + SimdElement, const LANES: usize> FragmentValue for Simd<T, LANES>
+where
+    LaneCount<LANES>: SupportedLaneCount,
+{
+    type IrValues = Value;
+
+    fn append_block_params(builder: &mut FunctionBuilder, block: Block) -> Self::IrValues {
+        builder.append_block_param(block, Self::ir_type())
+    }
+
+    fn unpack_ir_values(values: Self::IrValues, dst: &mut impl Extend<Value>) {
+        dst.extend_one(values)
+    }
+
+    fn emit_load(
+        builder: &mut FunctionBuilder,
+        flags: MemFlags,
+        address: Value,
+        offset: Offset32,
+    ) -> Self::IrValues {
+        builder.ins().load(Self::ir_type(), flags, address, offset)
+    }
+
+    fn emit_store(
+        builder: &mut FunctionBuilder,
+        flags: MemFlags,
+        address: Value,
+        values: Self::IrValues,
+        offset: Offset32,
+    ) {
+        builder.ins().store(flags, values, address, offset);
+    }
+}
+
 macro_rules! signed_int_fragment_impls {
-    ($([$typ:ty, $ir_typ:expr])*) => {
+    ($($typ:ty),* $(,)?) => {
         $(
         unsafe impl Fragment<()> for $typ {
             type Output = $typ;
@@ -160,23 +213,17 @@ macro_rules! signed_int_fragment_impls {
                 builder: &mut FunctionBuilder,
                 _inputs: (),
             ) -> Value {
-                builder.ins().iconst($ir_typ, *self as i64)
+                builder.ins().iconst(<$typ as PrimitiveValue>::ir_type(), *self as i64)
             }
         }
         )*
     }
 }
 
-signed_int_fragment_impls! {
-    [i8, types::I8]
-    [i16, types::I16]
-    [i32, types::I32]
-    [i64, types::I64]
-    [isize, ADDRESS_TYPE]
-}
+signed_int_fragment_impls!(i8, i16, i32, i64, isize);
 
 macro_rules! unsigned_int_fragment_impls {
-    ($([$typ:ty, $ir_typ:expr])*) => {
+    ($($typ:ty),* $(,)?) => {
         $(
         unsafe impl Fragment<()> for $typ {
             type Output = $typ;
@@ -186,23 +233,18 @@ macro_rules! unsigned_int_fragment_impls {
                 builder: &mut FunctionBuilder,
                 _inputs: (),
             ) -> Value {
-                builder.ins().iconst($ir_typ, *self as u64 as i64)
+                builder.ins().iconst(<$typ as PrimitiveValue>::ir_type(), *self as u64 as i64)
             }
         }
         )*
     }
 }
 
-unsigned_int_fragment_impls! {
-    [u8, types::I8]
-    [u16, types::I16]
-    [u32, types::I32]
-    [u64, types::I64]
-    [usize, ADDRESS_TYPE]
-}
+unsigned_int_fragment_impls!(u8, u16, u32, u64, usize);
 
-macro_rules! primitive_value_impl {
-    ($typ:ty, $ir_typ:expr) => {
+macro_rules! primitive_value_impls {
+    ($([$typ:ty, $ir_typ:expr])*) => {
+        $(
         unsafe impl FragmentValue for $typ {
             type IrValues = Value;
 
@@ -216,44 +258,35 @@ macro_rules! primitive_value_impl {
 
             fn emit_load(
                 builder: &mut FunctionBuilder,
+                flags: MemFlags,
                 address: Value,
                 offset: Offset32,
             ) -> Self::IrValues {
-                builder
-                    .ins()
-                    .load($ir_typ, MemFlags::trusted(), address, offset)
+                builder.ins().load($ir_typ, flags, address, offset)
             }
 
             fn emit_store(
                 builder: &mut FunctionBuilder,
+                flags: MemFlags,
                 address: Value,
                 values: Self::IrValues,
                 offset: Offset32,
             ) {
-                builder
-                    .ins()
-                    .store(MemFlags::trusted(), values, address, offset);
+                builder.ins().store(flags, values, address, offset);
             }
         }
-    };
-}
 
-macro_rules! primitive_value_impls {
-    ($([$typ:ty, $ir_typ:expr])*) => {
-        $(
-        primitive_value_impl!($typ, $ir_typ);
-        primitive_value_impl!(Simd<$typ, 1>, $ir_typ.by(1).unwrap());
-        primitive_value_impl!(Simd<$typ, 2>, $ir_typ.by(2).unwrap());
-        primitive_value_impl!(Simd<$typ, 4>, $ir_typ.by(4).unwrap());
-        primitive_value_impl!(Simd<$typ, 8>, $ir_typ.by(8).unwrap());
-        primitive_value_impl!(Simd<$typ, 16>, $ir_typ.by(16).unwrap());
-        primitive_value_impl!(Simd<$typ, 32>, $ir_typ.by(32).unwrap());
-        primitive_value_impl!(Simd<$typ, 64>, $ir_typ.by(64).unwrap());
+        unsafe impl PrimitiveValue for $typ {
+            fn ir_type() -> Type {
+                $ir_typ
+            }
+        }
         )*
     }
 }
 
 primitive_value_impls! {
+    [bool, types::I8]
     [i8, types::I8]
     [i16, types::I16]
     [i32, types::I32]
@@ -283,19 +316,21 @@ macro_rules! tuple_impl {
 
             fn emit_load(
                 builder: &mut FunctionBuilder,
+                flags: MemFlags,
                 address: Value,
                 offset: Offset32,
             ) -> Self::IrValues {
-                ($($typ_param::emit_load(builder, address, combine_offset(offset, offset_of_tuple!(Self, $idx))),)*)
+                ($($typ_param::emit_load(builder, flags, address, combine_offset(offset, offset_of_tuple!(Self, $idx))),)*)
             }
 
             fn emit_store(
                 builder: &mut FunctionBuilder,
+                flags: MemFlags,
                 address: Value,
                 values: Self::IrValues,
                 offset: Offset32,
             ) {
-                $($typ_param::emit_store(builder, address, values.$idx, combine_offset(offset, offset_of_tuple!(Self, $idx)));)*
+                $($typ_param::emit_store(builder, flags, address, values.$idx, combine_offset(offset, offset_of_tuple!(Self, $idx)));)*
             }
         }
 
@@ -376,19 +411,21 @@ macro_rules! pointer_fragment_impls {
 
             fn emit_load(
                 builder: &mut FunctionBuilder,
+                flags: MemFlags,
                 address: Value,
                 offset: Offset32,
             ) -> Self::IrValues {
-                emit_pointer_load::<$typ_var>(builder, address, offset)
+                emit_pointer_load::<$typ_var>(builder, flags, address, offset)
             }
 
             fn emit_store(
                 builder: &mut FunctionBuilder,
+                flags: MemFlags,
                 address: Value,
                 values: Self::IrValues,
                 offset: Offset32,
             ) {
-                emit_pointer_store::<$typ_var>(builder, address, values, offset)
+                emit_pointer_store::<$typ_var>(builder, flags, address, values, offset)
             }
         }
         )*
@@ -436,6 +473,7 @@ where
 
 fn emit_pointer_load<T: ?Sized>(
     builder: &mut FunctionBuilder,
+    flags: MemFlags,
     address: Value,
     offset: Offset32,
 ) -> PointerIrValues<T>
@@ -444,12 +482,14 @@ where
 {
     let address = usize::emit_load(
         builder,
+        flags,
         address,
         combine_offset(offset, offset_of!(PtrComponents<T>, data_address)),
     );
 
     let metadata = <<T as Pointee>::Metadata as FragmentValue>::emit_load(
         builder,
+        flags,
         address,
         combine_offset(offset, offset_of!(PtrComponents<T>, metadata)),
     );
@@ -459,6 +499,7 @@ where
 
 fn emit_pointer_store<T: ?Sized>(
     builder: &mut FunctionBuilder,
+    flags: MemFlags,
     address: Value,
     values: PointerIrValues<T>,
     offset: Offset32,
@@ -467,6 +508,7 @@ fn emit_pointer_store<T: ?Sized>(
 {
     usize::emit_store(
         builder,
+        flags,
         address,
         values.0,
         combine_offset(offset, offset_of!(PtrComponents<T>, data_address)),
@@ -474,6 +516,7 @@ fn emit_pointer_store<T: ?Sized>(
 
     <<T as Pointee>::Metadata as FragmentValue>::emit_store(
         builder,
+        flags,
         address,
         values.1,
         combine_offset(offset, offset_of!(PtrComponents<T>, metadata)),
