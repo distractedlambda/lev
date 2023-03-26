@@ -5,41 +5,147 @@ use cranelift_frontend::FunctionBuilder;
 
 use super::Fragment;
 
-#[derive(Clone, Copy, Debug)]
-pub struct Add;
+macro_rules! op_decls {
+    ($($name:ident),* $(,)?) => {
+        $(
+        #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+        pub struct $name;
+        )*
+    }
+}
 
-#[derive(Clone, Copy, Debug)]
-pub struct Sub;
+op_decls!(
+    Abs,
+    Add,
+    BitAnd,
+    BitOr,
+    BitXor,
+    Ceil,
+    CopySign,
+    CountLeadingOneBits,
+    CountLeadingZeroBits,
+    CountOneBits,
+    CountTrailingZeroBits,
+    Div,
+    FMax,
+    FMin,
+    Floor,
+    Max,
+    Min,
+    Mul,
+    Nearest,
+    Neg,
+    Not,
+    Rem,
+    ReverseBits,
+    ReverseBytes,
+    Sqrt,
+    Sub,
+    Trunc,
+    Shl,
+    Shr,
+    RotateLeft,
+    RotateRight,
+);
 
-#[derive(Clone, Copy, Debug)]
-pub struct Mul;
+macro_rules! unary_op_impl {
+    ($op_typ:ty, $val_typ:ty, $ins_func:ident) => {
+        unsafe impl Fragment<$val_typ> for $op_typ {
+            type Output = $val_typ;
 
-#[derive(Clone, Copy, Debug)]
-pub struct Div;
+            fn emit_ir(&self, builder: &mut FunctionBuilder, inputs: Value) -> Value {
+                builder.ins().$ins_func(inputs)
+            }
+        }
+    };
+}
 
-#[derive(Clone, Copy, Debug)]
-pub struct Rem;
+macro_rules! vectorized_unary_op_impls {
+    ($($op_typ:ty { $($ins_func:ident [$($val_typ:ty),* $(,)?])* })*) => {
+        $($($(
+        unary_op_impl!($op_typ, $val_typ, $ins_func);
+        unary_op_impl!($op_typ, Simd<$val_typ, 1>, $ins_func);
+        unary_op_impl!($op_typ, Simd<$val_typ, 2>, $ins_func);
+        unary_op_impl!($op_typ, Simd<$val_typ, 4>, $ins_func);
+        unary_op_impl!($op_typ, Simd<$val_typ, 8>, $ins_func);
+        unary_op_impl!($op_typ, Simd<$val_typ, 16>, $ins_func);
+        unary_op_impl!($op_typ, Simd<$val_typ, 32>, $ins_func);
+        unary_op_impl!($op_typ, Simd<$val_typ, 64>, $ins_func);
+        )*)*)*
+    }
+}
 
-#[derive(Clone, Copy, Debug)]
-pub struct BitAnd;
+vectorized_unary_op_impls! {
+    Neg {
+        ineg [i8, i16, i32, i64, isize]
+        fneg [f32, f64]
+    }
 
-#[derive(Clone, Copy, Debug)]
-pub struct BitOr;
+    Not {
+        bnot [i8, i16, i32, i64, isize, u8, u16, u32, u64, usize]
+    }
 
-#[derive(Clone, Copy, Debug)]
-pub struct BitXor;
+    CountOneBits {
+        popcnt [i8, i16, i32, i64, isize, u8, u16, u32, u64, usize]
+    }
 
-#[derive(Clone, Copy, Debug)]
-pub struct Min;
+    Sqrt {
+        sqrt [f32, f64]
+    }
 
-#[derive(Clone, Copy, Debug)]
-pub struct Max;
+    Abs {
+        iabs [i8, i16, i32, i64, isize]
+        fabs [f32, f64]
+    }
 
-#[derive(Clone, Copy, Debug)]
-pub struct FMin;
+    Ceil {
+        ceil [f32, f64]
+    }
 
-#[derive(Clone, Copy, Debug)]
-pub struct FMax;
+    Floor {
+        floor [f32, f64]
+    }
+
+    Trunc {
+        trunc [f32, f64]
+    }
+
+    Nearest {
+        nearest [f32, f64]
+    }
+}
+
+macro_rules! scalar_unary_op_impls {
+    ($($op_typ:ty { $($ins_func:ident [$($val_typ:ty),* $(,)?])* })*) => {
+        $($($(unary_op_impl!($op_typ, $val_typ, $ins_func);)*)*)*
+    }
+}
+
+scalar_unary_op_impls! {
+    Not {
+        bnot [bool]
+    }
+
+    ReverseBits {
+        bitrev [i8, i16, i32, i64, isize, u8, u16, u32, u64, usize]
+    }
+
+    ReverseBytes {
+        bswap [i16, i32, i64, isize, u16, u32, u64, usize]
+    }
+
+    CountLeadingZeroBits {
+        clz [i8, i16, i32, i64, isize, u8, u16, u32, u64, usize]
+    }
+
+    CountLeadingOneBits {
+        cls [i8, i16, i32, i64, isize, u8, u16, u32, u64, usize]
+    }
+
+    CountTrailingZeroBits {
+        ctz [i8, i16, i32, i64, isize, u8, u16, u32, u64, usize]
+    }
+}
 
 macro_rules! binary_op_impl {
     ($op_typ:ty, $val_typ:ty, $ins_func:ident) => {
@@ -119,6 +225,10 @@ vectorized_binary_op_impls! {
     FMax {
         fmax [f32, f64]
     }
+
+    CopySign {
+        fcopysign [f32, f64]
+    }
 }
 
 macro_rules! scalar_binary_op_impls {
@@ -136,5 +246,78 @@ scalar_binary_op_impls! {
     Rem {
         srem [i8, i16, i32, i64, isize]
         urem [u8, u16, u32, u64, usize]
+    }
+
+    BitAnd {
+        band [bool]
+    }
+
+    BitOr {
+        bor [bool]
+    }
+
+    BitXor {
+        bxor [bool]
+    }
+}
+
+macro_rules! shift_op_impl {
+    ($op_typ:ty, $lhs_typ:ty, $rhs_typ:ty, $ins_func:ident) => {
+        unsafe impl Fragment<($lhs_typ, $rhs_typ)> for $op_typ {
+            type Output = $lhs_typ;
+
+            fn emit_ir(&self, builder: &mut FunctionBuilder, inputs: (Value, Value)) -> Value {
+                builder.ins().$ins_func(inputs.0, inputs.1)
+            }
+        }
+    }
+}
+
+macro_rules! shift_op_impls_helper {
+    ($op_typ:ty, $lhs_typ:ty, $ins_func:ident) => {
+        shift_op_impl!($op_typ, $lhs_typ, u8, $ins_func);
+        shift_op_impl!($op_typ, $lhs_typ, u16, $ins_func);
+        shift_op_impl!($op_typ, $lhs_typ, u32, $ins_func);
+        shift_op_impl!($op_typ, $lhs_typ, u64, $ins_func);
+        shift_op_impl!($op_typ, $lhs_typ, usize, $ins_func);
+        shift_op_impl!($op_typ, $lhs_typ, i8, $ins_func);
+        shift_op_impl!($op_typ, $lhs_typ, i16, $ins_func);
+        shift_op_impl!($op_typ, $lhs_typ, i32, $ins_func);
+        shift_op_impl!($op_typ, $lhs_typ, i64, $ins_func);
+        shift_op_impl!($op_typ, $lhs_typ, isize, $ins_func);
+    }
+}
+
+macro_rules! shift_op_impls {
+    ($($op_typ:ty { $($ins_func:ident [$($lhs_typ:ty),* $(,)?])* })*) => {
+        $($($(
+        shift_op_impls_helper!($op_typ, $lhs_typ, $ins_func);
+        shift_op_impls_helper!($op_typ, Simd<$lhs_typ, 1>, $ins_func);
+        shift_op_impls_helper!($op_typ, Simd<$lhs_typ, 2>, $ins_func);
+        shift_op_impls_helper!($op_typ, Simd<$lhs_typ, 4>, $ins_func);
+        shift_op_impls_helper!($op_typ, Simd<$lhs_typ, 8>, $ins_func);
+        shift_op_impls_helper!($op_typ, Simd<$lhs_typ, 16>, $ins_func);
+        shift_op_impls_helper!($op_typ, Simd<$lhs_typ, 32>, $ins_func);
+        shift_op_impls_helper!($op_typ, Simd<$lhs_typ, 64>, $ins_func);
+        )*)*)*
+    }
+}
+
+shift_op_impls! {
+    Shl {
+        ishl [u8, u16, u32, u64, usize, i8, i16, i32, i64, isize]
+    }
+
+    Shr {
+        sshr [i8, i16, i32, i64, isize]
+        ushr [u8, u16, u32, u64, usize]
+    }
+
+    RotateLeft {
+        rotl [u8, u16, u32, u64, usize, i8, i16, i32, i64, isize]
+    }
+
+    RotateRight {
+        rotr [u8, u16, u32, u64, usize, i8, i16, i32, i64, isize]
     }
 }
