@@ -1,8 +1,14 @@
 mod foreign_impls;
+mod jit;
 mod ops;
 
 use cranelift_codegen::ir::{immediates::Offset32, types, Block, MemFlags, Type, Value};
 use cranelift_frontend::FunctionBuilder;
+pub use ops::{
+    Abs, Add, BitAnd, BitOr, BitXor, Ceil, CopySign, CountLeadingOneBits, CountLeadingZeroBits,
+    CountOneBits, CountTrailingZeroBits, Div, FMax, FMin, Floor, Max, Min, Mul, Nearest, Neg, Not,
+    Rem, ReverseBits, ReverseBytes, RotateLeft, RotateRight, Shl, Shr, Sqrt, Sub, Trunc,
+};
 
 pub unsafe trait Fragment<Input: FragmentValue> {
     type Output: FragmentValue;
@@ -13,6 +19,8 @@ pub unsafe trait Fragment<Input: FragmentValue> {
         inputs: Input::IrValues,
     ) -> <Self::Output as FragmentValue>::IrValues;
 }
+
+pub unsafe trait SafeFragment<Input: FragmentValue>: Fragment<Input> {}
 
 pub unsafe trait FragmentValue: Copy + 'static {
     type IrValues: Clone;
@@ -37,7 +45,9 @@ pub unsafe trait FragmentValue: Copy + 'static {
     );
 }
 
-pub unsafe trait PrimitiveValue: Fragment<(), Output = Self> + FragmentValue<IrValues = Value> {
+pub unsafe trait PrimitiveValue:
+    Fragment<(), Output = Self> + FragmentValue<IrValues = Value>
+{
     fn ir_type() -> Type;
 }
 

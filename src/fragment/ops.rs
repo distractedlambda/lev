@@ -3,7 +3,7 @@ use std::simd::{LaneCount, Simd, SupportedLaneCount};
 use cranelift_codegen::ir::{InstBuilder, Value};
 use cranelift_frontend::FunctionBuilder;
 
-use super::Fragment;
+use super::{Fragment, SafeFragment};
 
 macro_rules! op_decls {
     ($($name:ident),* $(,)?) => {
@@ -57,6 +57,8 @@ macro_rules! unary_op_impl {
                 builder.ins().$ins_func(inputs)
             }
         }
+
+        unsafe impl SafeFragment<$val_typ> for $op_typ {}
     };
 }
 
@@ -71,6 +73,11 @@ macro_rules! simd_unary_op_impl {
             fn emit_ir(&self, builder: &mut FunctionBuilder, inputs: Value) -> Value {
                 builder.ins().$ins_func(inputs)
             }
+        }
+
+        unsafe impl<const LANES: usize> SafeFragment<Simd<$val_typ, LANES>> for $op_typ where
+            LaneCount<LANES>: SupportedLaneCount
+        {
         }
     };
 }
@@ -165,6 +172,8 @@ macro_rules! binary_op_impl {
                 builder.ins().$ins_func(inputs.0, inputs.1)
             }
         }
+
+        unsafe impl SafeFragment<($val_typ, $val_typ)> for $op_typ {}
     };
 }
 
@@ -180,6 +189,13 @@ macro_rules! simd_binary_op_impl {
             fn emit_ir(&self, builder: &mut FunctionBuilder, inputs: (Value, Value)) -> Value {
                 builder.ins().$ins_func(inputs.0, inputs.1)
             }
+        }
+
+        unsafe impl<const LANES: usize> SafeFragment<(Simd<$val_typ, LANES>, Simd<$val_typ, LANES>)>
+            for $op_typ
+        where
+            LaneCount<LANES>: SupportedLaneCount,
+        {
         }
     };
 }
@@ -290,6 +306,8 @@ macro_rules! shift_op_impl {
             }
         }
 
+        unsafe impl SafeFragment<($lhs_typ, $rhs_typ)> for $op_typ {}
+
         unsafe impl<const LANES: usize> Fragment<(Simd<$lhs_typ, LANES>, $rhs_typ)> for $op_typ
         where
             LaneCount<LANES>: SupportedLaneCount,
@@ -300,6 +318,11 @@ macro_rules! shift_op_impl {
                 builder.ins().$ins_func(inputs.0, inputs.1)
             }
         }
+
+        unsafe impl<const LANES: usize> SafeFragment<(Simd<$lhs_typ, LANES>, $rhs_typ)> for $op_typ
+        where
+            LaneCount<LANES>: SupportedLaneCount,
+        {}
     };
 }
 

@@ -12,6 +12,7 @@ use cranelift_frontend::FunctionBuilder;
 use memoffset::{offset_of, offset_of_tuple};
 
 use super::{Fragment, FragmentValue, PrimitiveValue, ADDRESS_TYPE};
+use crate::fragment::SafeFragment;
 
 unsafe impl<T: SimdElement + PrimitiveValue, const LANES: usize> PrimitiveValue for Simd<T, LANES>
 where
@@ -28,6 +29,8 @@ unsafe impl Fragment<()> for () {
     fn emit_ir(&self, _builder: &mut FunctionBuilder, _inputs: ()) {}
 }
 
+unsafe impl SafeFragment<()> for () {}
+
 unsafe impl Fragment<()> for bool {
     type Output = bool;
 
@@ -38,6 +41,8 @@ unsafe impl Fragment<()> for bool {
     }
 }
 
+unsafe impl SafeFragment<()> for bool {}
+
 unsafe impl Fragment<()> for f32 {
     type Output = f32;
 
@@ -46,6 +51,8 @@ unsafe impl Fragment<()> for f32 {
     }
 }
 
+unsafe impl SafeFragment<()> for f32 {}
+
 unsafe impl Fragment<()> for f64 {
     type Output = f64;
 
@@ -53,6 +60,8 @@ unsafe impl Fragment<()> for f64 {
         builder.ins().f64const(*self)
     }
 }
+
+unsafe impl SafeFragment<()> for f64 {}
 
 unsafe impl<T: Fragment<Input>, Input: FragmentValue, const N: usize> Fragment<[Input; N]>
     for [T; N]
@@ -68,6 +77,11 @@ unsafe impl<T: Fragment<Input>, Input: FragmentValue, const N: usize> Fragment<[
             .zip(inputs)
             .map(|(f, i)| f.emit_ir(builder, i))
     }
+}
+
+unsafe impl<T: SafeFragment<Input>, Input: FragmentValue, const N: usize> SafeFragment<[Input; N]>
+    for [T; N]
+{
 }
 
 unsafe impl<T: PrimitiveValue + SimdElement, const LANES: usize> Fragment<()> for Simd<T, LANES>
@@ -93,6 +107,11 @@ where
 
         vector
     }
+}
+
+unsafe impl<T: PrimitiveValue + SimdElement, const LANES: usize> SafeFragment<()> for Simd<T, LANES> where
+    LaneCount<LANES>: SupportedLaneCount
+{
 }
 
 unsafe impl FragmentValue for () {
@@ -216,6 +235,8 @@ macro_rules! signed_int_fragment_impls {
                 builder.ins().iconst(<$typ as PrimitiveValue>::ir_type(), *self as i64)
             }
         }
+
+        unsafe impl SafeFragment<()> for $typ {}
         )*
     }
 }
@@ -236,6 +257,8 @@ macro_rules! unsigned_int_fragment_impls {
                 builder.ins().iconst(<$typ as PrimitiveValue>::ir_type(), *self as u64 as i64)
             }
         }
+
+        unsafe impl SafeFragment<()> for $typ {}
         )*
     }
 }
@@ -345,6 +368,8 @@ macro_rules! tuple_impl {
                 ($(self.$idx.emit_ir(builder, inputs.$idx),)*)
             }
         }
+
+        unsafe impl<$($typ_param: SafeFragment<$input_param>, $input_param: FragmentValue,)*> SafeFragment<($($input_param,)*)> for ($($typ_param,)*) {}
     }
 }
 
