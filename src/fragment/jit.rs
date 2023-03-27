@@ -6,7 +6,7 @@ use cranelift_codegen::{
 };
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_jit::{JITBuilder, JITModule};
-use cranelift_module::{default_libcall_names, Module, ModuleResult};
+use cranelift_module::{default_libcall_names, Module};
 
 use crate::fragment::{Fragment, FragmentValue, SafeFragment, ADDRESS_TYPE};
 
@@ -26,12 +26,9 @@ pub type CompiledUnsafeFragment<Input, Output> = CompiledFragment<Input, Output,
 pub type CompiledSafeFragment<Input, Output> = CompiledFragment<Input, Output, true>;
 
 impl FragmentCompiler {
-    pub fn new() -> ModuleResult<Self> {
+    pub fn new() -> anyhow::Result<Self> {
         Ok(Self {
-            module: JITModule::new(JITBuilder::with_flags(
-                &[("opt_level", "best")],
-                default_libcall_names(),
-            )?),
+            module: JITModule::new(JITBuilder::new(default_libcall_names())?),
             frontend_context: FunctionBuilderContext::new(),
             backend_context: Context::new(),
         })
@@ -40,21 +37,21 @@ impl FragmentCompiler {
     pub fn compile_unsafe<F: Fragment<Input>, Input: FragmentValue>(
         &mut self,
         fragment: &F,
-    ) -> ModuleResult<CompiledUnsafeFragment<Input, F::Output>> {
+    ) -> anyhow::Result<CompiledUnsafeFragment<Input, F::Output>> {
         self.compile_with_safety(fragment)
     }
 
     pub fn compile<F: SafeFragment<Input>, Input: FragmentValue>(
         &mut self,
         fragment: &F,
-    ) -> ModuleResult<CompiledSafeFragment<Input, F::Output>> {
+    ) -> anyhow::Result<CompiledSafeFragment<Input, F::Output>> {
         self.compile_with_safety(fragment)
     }
 
     fn compile_with_safety<F: Fragment<Input>, Input: FragmentValue, const SAFE: bool>(
         &mut self,
         fragment: &F,
-    ) -> ModuleResult<CompiledFragment<Input, F::Output, SAFE>> {
+    ) -> anyhow::Result<CompiledFragment<Input, F::Output, SAFE>> {
         Ok(CompiledFragment(unsafe {
             transmute(self.codegen(fragment)?)
         }))
@@ -63,7 +60,7 @@ impl FragmentCompiler {
     fn codegen<F: Fragment<Input>, Input: FragmentValue>(
         &mut self,
         fragment: &F,
-    ) -> ModuleResult<*const u8> {
+    ) -> anyhow::Result<*const u8> {
         let (mut builder, input_address, output_address) = self.begin_codegen();
 
         let inputs = Input::emit_load(
@@ -110,7 +107,7 @@ impl FragmentCompiler {
         (builder, input_address, output_address)
     }
 
-    fn finish_codegen(&mut self) -> ModuleResult<*const u8> {
+    fn finish_codegen(&mut self) -> anyhow::Result<*const u8> {
         let id = self
             .module
             .declare_anonymous_function(&self.backend_context.func.signature)?;
@@ -121,7 +118,7 @@ impl FragmentCompiler {
 }
 
 impl<Input, Output, const SAFE: bool> CompiledFragment<Input, Output, SAFE> {
-    unsafe fn call_unsafe(&self, input: &Input) -> Output {
+    pub unsafe fn call_unsafe(&self, input: &Input) -> Output {
         let mut output = MaybeUninit::uninit();
         (self.0)(input, &mut output);
         output.assume_init()
@@ -129,7 +126,7 @@ impl<Input, Output, const SAFE: bool> CompiledFragment<Input, Output, SAFE> {
 }
 
 impl<Input, Output> CompiledFragment<Input, Output, true> {
-    fn call(&self, input: &Input) -> Output {
+    pub fn call(&self, input: &Input) -> Output {
         unsafe { self.call_unsafe(input) }
     }
 }

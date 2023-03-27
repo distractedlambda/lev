@@ -221,6 +221,7 @@ dependencies = [
 name = "lev"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "cranelift-bforest",
  "cranelift-codegen",
  "cranelift-entity",

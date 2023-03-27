@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+anyhow = "1.0.70"
 cranelift-bforest = "0.94.0"
 cranelift-codegen = "0.94.0"
 cranelift-entity = "0.94.0"
