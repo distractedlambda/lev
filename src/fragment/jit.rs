@@ -1,7 +1,9 @@
 use std::mem::{transmute, MaybeUninit};
 
+use anyhow::anyhow;
 use cranelift_codegen::{
     ir::{immediates::Offset32, AbiParam, InstBuilder, MemFlags, Value},
+    settings::Configurable,
     Context,
 };
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
@@ -27,8 +29,17 @@ pub type CompiledSafeFragment<Input, Output> = CompiledFragment<Input, Output, t
 
 impl FragmentCompiler {
     pub fn new() -> anyhow::Result<Self> {
+        let mut flags = cranelift_codegen::settings::builder();
+
+        flags.set("use_colocated_libcalls", "false")?;
+
         Ok(Self {
-            module: JITModule::new(JITBuilder::new(default_libcall_names())?),
+            module: JITModule::new(JITBuilder::with_isa(
+                cranelift_native::builder()
+                    .map_err(|msg| anyhow!("{}", msg))?
+                    .finish(cranelift_codegen::settings::Flags::new(flags))?,
+                default_libcall_names(),
+            )),
             frontend_context: FunctionBuilderContext::new(),
             backend_context: Context::new(),
         })
