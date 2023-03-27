@@ -75,7 +75,7 @@ impl<A: Fragment, B: Fragment<Input = A::Input>> Fragment for CommonInput<A, B> 
 unsafe impl<A: SafeFragment, B: SafeFragment<Input = A::Input>> SafeFragment for CommonInput<A, B> {}
 
 #[derive(Clone, Copy, Debug)]
-pub struct Compose<A, B>(A, B);
+pub struct Compose<A, B>(pub A, pub B);
 
 impl<A: Fragment, B: Fragment<Input = A::Output>> Fragment for Compose<A, B> {
     type Input = A::Input;

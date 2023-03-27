@@ -6,13 +6,13 @@
 #![feature(portable_simd)]
 #![feature(ptr_metadata)]
 
-use crate::fragment::{add, FragmentCompiler};
+use crate::fragment::{add, Compose, FragmentCompiler, mul, neg};
 
 mod fragment;
 
 fn main() -> anyhow::Result<()> {
     let mut compiler = FragmentCompiler::new()?;
-    let f = compiler.compile(&add::<usize>())?;
-    println!("42 + 1 = {}", f.call(&(42, 1)));
+    let f = compiler.compile(&Compose(mul::<isize>(), neg::<isize>()))?;
+    println!("-(42 * 2) = {}", f.call(&(42, 2)));
     Ok(())
 }
