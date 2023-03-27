@@ -1,4 +1,7 @@
-use std::simd::{LaneCount, Simd, SupportedLaneCount};
+use std::{
+    marker::PhantomData,
+    simd::{LaneCount, Simd, SupportedLaneCount},
+};
 
 use cranelift_codegen::ir::{InstBuilder, Value};
 use cranelift_frontend::FunctionBuilder;
@@ -6,51 +9,64 @@ use cranelift_frontend::FunctionBuilder;
 use super::{Fragment, SafeFragment};
 
 macro_rules! op_decls {
-    ($($name:ident),* $(,)?) => {
+    ($([$name:ident<$($typ_param:ident),* $(,)?>, $factory:ident])*) => {
         $(
-        #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
-        pub struct $name;
+        pub struct $name<$($typ_param),*>(PhantomData<($($typ_param,)*)>);
+
+        impl<$($typ_param),*> Clone for $name<$($typ_param),*> {
+            fn clone(&self) -> Self {
+                $name(PhantomData)
+            }
+        }
+
+        impl<$($typ_param),*> Copy for $name<$($typ_param),*> {}
+
+        pub fn $factory<$($typ_param),*>() -> $name<$($typ_param),*> {
+            $name(PhantomData)
+        }
         )*
     }
 }
 
 op_decls!(
-    Abs,
-    Add,
-    BitAnd,
-    BitOr,
-    BitXor,
-    Ceil,
-    CopySign,
-    CountLeadingOneBits,
-    CountLeadingZeroBits,
-    CountOneBits,
-    CountTrailingZeroBits,
-    Div,
-    FMax,
-    FMin,
-    Floor,
-    Max,
-    Min,
-    Mul,
-    Nearest,
-    Neg,
-    Not,
-    Rem,
-    ReverseBits,
-    ReverseBytes,
-    RotateLeft,
-    RotateRight,
-    Shl,
-    Shr,
-    Sqrt,
-    Sub,
-    Trunc,
+    [Abs<T>, abs]
+    [Add<T>, add]
+    [BitAnd<T>, bitand]
+    [BitOr<T>, bitor]
+    [BitXor<T>, bitxor]
+    [Ceil<T>, ceil]
+    [CopySign<T>, copysign]
+    [CountLeadingOneBits<T>, count_leading_one_bits]
+    [CountLeadingZeroBits<T>, count_leading_zero_bits]
+    [CountOneBits<T>, count_one_bits]
+    [CountTrailingZeroBits<T>, count_trailing_zero_bits]
+    [Div<T>, div]
+    [FMax<T>, fmax]
+    [FMin<T>, fmin]
+    [Floor<T>, floor]
+    [Max<T>, max]
+    [Min<T>, min]
+    [Mul<T>, mul]
+    [Nearest<T>, nearest]
+    [Neg<T>, neg]
+    [Not<T>, not]
+    [Rem<T>, rem]
+    [ReverseBits<T>, reverse_bits]
+    [ReverseBytes<T>, reverse_bytes]
+    [RotateLeft<L, R>, rotate_left]
+    [RotateRight<L, R>, rotate_right]
+    [Shl<L, R>, shl]
+    [Shr<L, R>, shr]
+    [Sqrt<T>, sqrt]
+    [Sub<T>, sub]
+    [Trunc<T>, trunc]
 );
 
 macro_rules! unary_op_impl {
-    ($op_typ:ty, $val_typ:ty, $ins_func:ident) => {
-        unsafe impl Fragment<$val_typ> for $op_typ {
+    ($op_typ:ident, $val_typ:ty, $ins_func:ident) => {
+        impl Fragment for $op_typ<$val_typ> {
+            type Input = $val_typ;
+
             type Output = $val_typ;
 
             fn emit_ir(&self, builder: &mut FunctionBuilder, inputs: Value) -> Value {
@@ -58,16 +74,18 @@ macro_rules! unary_op_impl {
             }
         }
 
-        unsafe impl SafeFragment<$val_typ> for $op_typ {}
+        unsafe impl SafeFragment for $op_typ<$val_typ> {}
     };
 }
 
 macro_rules! simd_unary_op_impl {
-    ($op_typ:ty, $val_typ:ty, $ins_func:ident) => {
-        unsafe impl<const LANES: usize> Fragment<Simd<$val_typ, LANES>> for $op_typ
+    ($op_typ:ident, $val_typ:ty, $ins_func:ident) => {
+        impl<const LANES: usize> Fragment for $op_typ<Simd<$val_typ, LANES>>
         where
             LaneCount<LANES>: SupportedLaneCount,
         {
+            type Input = Simd<$val_typ, LANES>;
+
             type Output = Simd<$val_typ, LANES>;
 
             fn emit_ir(&self, builder: &mut FunctionBuilder, inputs: Value) -> Value {
@@ -75,7 +93,7 @@ macro_rules! simd_unary_op_impl {
             }
         }
 
-        unsafe impl<const LANES: usize> SafeFragment<Simd<$val_typ, LANES>> for $op_typ where
+        unsafe impl<const LANES: usize> SafeFragment for $op_typ<Simd<$val_typ, LANES>> where
             LaneCount<LANES>: SupportedLaneCount
         {
         }
@@ -83,7 +101,7 @@ macro_rules! simd_unary_op_impl {
 }
 
 macro_rules! vectorized_unary_op_impls {
-    ($($op_typ:ty { $($ins_func:ident [$($val_typ:ty),* $(,)?])* })*) => {
+    ($($op_typ:ident { $($ins_func:ident [$($val_typ:ty),* $(,)?])* })*) => {
         $($($(
         unary_op_impl!($op_typ, $val_typ, $ins_func);
         simd_unary_op_impl!($op_typ, $val_typ, $ins_func);
@@ -132,7 +150,7 @@ vectorized_unary_op_impls! {
 }
 
 macro_rules! scalar_unary_op_impls {
-    ($($op_typ:ty { $($ins_func:ident [$($val_typ:ty),* $(,)?])* })*) => {
+    ($($op_typ:ident { $($ins_func:ident [$($val_typ:ty),* $(,)?])* })*) => {
         $($($(unary_op_impl!($op_typ, $val_typ, $ins_func);)*)*)*
     }
 }
@@ -164,8 +182,10 @@ scalar_unary_op_impls! {
 }
 
 macro_rules! binary_op_impl {
-    ($op_typ:ty, $val_typ:ty, $ins_func:ident) => {
-        unsafe impl Fragment<($val_typ, $val_typ)> for $op_typ {
+    ($op_typ:ident, $val_typ:ty, $ins_func:ident) => {
+        impl Fragment for $op_typ<$val_typ> {
+            type Input = ($val_typ, $val_typ);
+
             type Output = $val_typ;
 
             fn emit_ir(&self, builder: &mut FunctionBuilder, inputs: (Value, Value)) -> Value {
@@ -173,17 +193,18 @@ macro_rules! binary_op_impl {
             }
         }
 
-        unsafe impl SafeFragment<($val_typ, $val_typ)> for $op_typ {}
+        unsafe impl SafeFragment for $op_typ<$val_typ> {}
     };
 }
 
 macro_rules! simd_binary_op_impl {
-    ($op_typ:ty, $val_typ:ty, $ins_func:ident) => {
-        unsafe impl<const LANES: usize> Fragment<(Simd<$val_typ, LANES>, Simd<$val_typ, LANES>)>
-            for $op_typ
+    ($op_typ:ident, $val_typ:ty, $ins_func:ident) => {
+        impl<const LANES: usize> Fragment for $op_typ<Simd<$val_typ, LANES>>
         where
             LaneCount<LANES>: SupportedLaneCount,
         {
+            type Input = (Simd<$val_typ, LANES>, Simd<$val_typ, LANES>);
+
             type Output = Simd<$val_typ, LANES>;
 
             fn emit_ir(&self, builder: &mut FunctionBuilder, inputs: (Value, Value)) -> Value {
@@ -191,17 +212,15 @@ macro_rules! simd_binary_op_impl {
             }
         }
 
-        unsafe impl<const LANES: usize> SafeFragment<(Simd<$val_typ, LANES>, Simd<$val_typ, LANES>)>
-            for $op_typ
-        where
-            LaneCount<LANES>: SupportedLaneCount,
+        unsafe impl<const LANES: usize> SafeFragment for $op_typ<Simd<$val_typ, LANES>> where
+            LaneCount<LANES>: SupportedLaneCount
         {
         }
     };
 }
 
 macro_rules! vectorized_binary_op_impls {
-    ($($op_typ:ty { $($ins_func:ident [$($val_typ:ty),* $(,)?])* })*) => {
+    ($($op_typ:ident { $($ins_func:ident [$($val_typ:ty),* $(,)?])* })*) => {
         $($($(
         binary_op_impl!($op_typ, $val_typ, $ins_func);
         simd_binary_op_impl!($op_typ, $val_typ, $ins_func);
@@ -267,7 +286,7 @@ vectorized_binary_op_impls! {
 }
 
 macro_rules! scalar_binary_op_impls {
-    ($($op_typ:ty { $($ins_func:ident [$($val_typ:ty),* $(,)?])* })*) => {
+    ($($op_typ:ident { $($ins_func:ident [$($val_typ:ty),* $(,)?])* })*) => {
         $($($(binary_op_impl!($op_typ, $val_typ, $ins_func);)*)*)*
     }
 }
@@ -297,8 +316,10 @@ scalar_binary_op_impls! {
 }
 
 macro_rules! shift_op_impl {
-    ($op_typ:ty, $lhs_typ:ty, $rhs_typ:ty, $ins_func:ident) => {
-        unsafe impl Fragment<($lhs_typ, $rhs_typ)> for $op_typ {
+    ($op_typ:ident, $lhs_typ:ty, $rhs_typ:ty, $ins_func:ident) => {
+        impl Fragment for $op_typ<$lhs_typ, $rhs_typ> {
+            type Input = ($lhs_typ, $rhs_typ);
+
             type Output = $lhs_typ;
 
             fn emit_ir(&self, builder: &mut FunctionBuilder, inputs: (Value, Value)) -> Value {
@@ -306,12 +327,14 @@ macro_rules! shift_op_impl {
             }
         }
 
-        unsafe impl SafeFragment<($lhs_typ, $rhs_typ)> for $op_typ {}
+        unsafe impl SafeFragment for $op_typ<$lhs_typ, $rhs_typ> {}
 
-        unsafe impl<const LANES: usize> Fragment<(Simd<$lhs_typ, LANES>, $rhs_typ)> for $op_typ
+        impl<const LANES: usize> Fragment for $op_typ<Simd<$lhs_typ, LANES>, $rhs_typ>
         where
             LaneCount<LANES>: SupportedLaneCount,
         {
+            type Input = (Simd<$lhs_typ, LANES>, $rhs_typ);
+
             type Output = Simd<$lhs_typ, LANES>;
 
             fn emit_ir(&self, builder: &mut FunctionBuilder, inputs: (Value, Value)) -> Value {
@@ -319,7 +342,7 @@ macro_rules! shift_op_impl {
             }
         }
 
-        unsafe impl<const LANES: usize> SafeFragment<(Simd<$lhs_typ, LANES>, $rhs_typ)> for $op_typ
+        unsafe impl<const LANES: usize> SafeFragment for $op_typ<Simd<$lhs_typ, LANES>, $rhs_typ>
         where
             LaneCount<LANES>: SupportedLaneCount,
         {}
@@ -327,7 +350,7 @@ macro_rules! shift_op_impl {
 }
 
 macro_rules! shift_op_impls {
-    ($($op_typ:ty { $($ins_func:ident [$($lhs_typ:ty),* $(,)?])* })*) => {
+    ($($op_typ:ident { $($ins_func:ident [$($lhs_typ:ty),* $(,)?])* })*) => {
         $($($(
         shift_op_impl!($op_typ, $lhs_typ, u8, $ins_func);
         shift_op_impl!($op_typ, $lhs_typ, u16, $ins_func);

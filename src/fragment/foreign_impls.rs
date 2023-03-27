@@ -11,8 +11,7 @@ use cranelift_codegen::ir::{
 use cranelift_frontend::FunctionBuilder;
 use memoffset::{offset_of, offset_of_tuple};
 
-use super::{Fragment, FragmentValue, PrimitiveValue, ADDRESS_TYPE};
-use crate::fragment::SafeFragment;
+use super::{Fragment, FragmentValue, PrimitiveValue, SafeFragment, ADDRESS_TYPE};
 
 unsafe impl<T: SimdElement + PrimitiveValue, const LANES: usize> PrimitiveValue for Simd<T, LANES>
 where
@@ -23,15 +22,19 @@ where
     }
 }
 
-unsafe impl Fragment<()> for () {
+impl Fragment for () {
+    type Input = ();
+
     type Output = ();
 
     fn emit_ir(&self, _builder: &mut FunctionBuilder, _inputs: ()) {}
 }
 
-unsafe impl SafeFragment<()> for () {}
+unsafe impl SafeFragment for () {}
 
-unsafe impl Fragment<()> for bool {
+impl Fragment for bool {
+    type Input = ();
+
     type Output = bool;
 
     fn emit_ir(&self, builder: &mut FunctionBuilder, _inputs: ()) -> Value {
@@ -41,9 +44,11 @@ unsafe impl Fragment<()> for bool {
     }
 }
 
-unsafe impl SafeFragment<()> for bool {}
+unsafe impl SafeFragment for bool {}
 
-unsafe impl Fragment<()> for f32 {
+impl Fragment for f32 {
+    type Input = ();
+
     type Output = f32;
 
     fn emit_ir(&self, builder: &mut FunctionBuilder, _inputs: ()) -> Value {
@@ -51,9 +56,11 @@ unsafe impl Fragment<()> for f32 {
     }
 }
 
-unsafe impl SafeFragment<()> for f32 {}
+unsafe impl SafeFragment for f32 {}
 
-unsafe impl Fragment<()> for f64 {
+impl Fragment for f64 {
+    type Input = ();
+
     type Output = f64;
 
     fn emit_ir(&self, builder: &mut FunctionBuilder, _inputs: ()) -> Value {
@@ -61,17 +68,17 @@ unsafe impl Fragment<()> for f64 {
     }
 }
 
-unsafe impl SafeFragment<()> for f64 {}
+unsafe impl SafeFragment for f64 {}
 
-unsafe impl<T: Fragment<Input>, Input: FragmentValue, const N: usize> Fragment<[Input; N]>
-    for [T; N]
-{
+impl<T: Fragment, const N: usize> Fragment for [T; N] {
+    type Input = [T::Input; N];
+
     type Output = [T::Output; N];
 
     fn emit_ir(
         &self,
         builder: &mut FunctionBuilder,
-        inputs: [Input::IrValues; N],
+        inputs: [<T::Input as FragmentValue>::IrValues; N],
     ) -> [<T::Output as FragmentValue>::IrValues; N] {
         self.each_ref()
             .zip(inputs)
@@ -79,15 +86,14 @@ unsafe impl<T: Fragment<Input>, Input: FragmentValue, const N: usize> Fragment<[
     }
 }
 
-unsafe impl<T: SafeFragment<Input>, Input: FragmentValue, const N: usize> SafeFragment<[Input; N]>
-    for [T; N]
-{
-}
+unsafe impl<T: SafeFragment, const N: usize> SafeFragment for [T; N] {}
 
-unsafe impl<T: PrimitiveValue + SimdElement, const LANES: usize> Fragment<()> for Simd<T, LANES>
+impl<T: PrimitiveValue + SimdElement, const LANES: usize> Fragment for Simd<T, LANES>
 where
     LaneCount<LANES>: SupportedLaneCount,
 {
+    type Input = ();
+
     type Output = Self;
 
     fn emit_ir(&self, builder: &mut FunctionBuilder, _inputs: ()) -> Value {
@@ -109,7 +115,7 @@ where
     }
 }
 
-unsafe impl<T: PrimitiveValue + SimdElement, const LANES: usize> SafeFragment<()> for Simd<T, LANES> where
+unsafe impl<T: PrimitiveValue + SimdElement, const LANES: usize> SafeFragment for Simd<T, LANES> where
     LaneCount<LANES>: SupportedLaneCount
 {
 }
@@ -224,7 +230,9 @@ where
 macro_rules! signed_int_fragment_impls {
     ($($typ:ty),* $(,)?) => {
         $(
-        unsafe impl Fragment<()> for $typ {
+        impl Fragment for $typ {
+            type Input = ();
+
             type Output = $typ;
 
             fn emit_ir(
@@ -236,7 +244,7 @@ macro_rules! signed_int_fragment_impls {
             }
         }
 
-        unsafe impl SafeFragment<()> for $typ {}
+        unsafe impl SafeFragment for $typ {}
         )*
     }
 }
@@ -246,7 +254,9 @@ signed_int_fragment_impls!(i8, i16, i32, i64, isize);
 macro_rules! unsigned_int_fragment_impls {
     ($($typ:ty),* $(,)?) => {
         $(
-        unsafe impl Fragment<()> for $typ {
+        impl Fragment for $typ {
+            type Input = ();
+
             type Output = $typ;
 
             fn emit_ir(
@@ -258,7 +268,7 @@ macro_rules! unsigned_int_fragment_impls {
             }
         }
 
-        unsafe impl SafeFragment<()> for $typ {}
+        unsafe impl SafeFragment for $typ {}
         )*
     }
 }
@@ -325,7 +335,7 @@ primitive_value_impls! {
 }
 
 macro_rules! tuple_impl {
-    ($([$typ_param:ident, $input_param:ident, $idx:tt])*) => {
+    ($([$typ_param:ident, $idx:tt])*) => {
         unsafe impl<$($typ_param: FragmentValue,)*> FragmentValue for ($($typ_param,)*) {
             type IrValues = ($($typ_param::IrValues,)*);
 
@@ -357,19 +367,21 @@ macro_rules! tuple_impl {
             }
         }
 
-        unsafe impl<$($typ_param: Fragment<$input_param>, $input_param: FragmentValue,)*> Fragment<($($input_param,)*)> for ($($typ_param,)*) {
+        impl<$($typ_param: Fragment,)*> Fragment for ($($typ_param,)*) {
+            type Input = ($($typ_param::Input,)*);
+
             type Output = ($($typ_param::Output,)*);
 
             fn emit_ir(
                 &self,
                 builder: &mut FunctionBuilder,
-                inputs: ($(<$input_param as FragmentValue>::IrValues,)*),
+                inputs: ($(<$typ_param::Input as FragmentValue>::IrValues,)*),
             ) -> ($(<$typ_param::Output as FragmentValue>::IrValues,)*) {
                 ($(self.$idx.emit_ir(builder, inputs.$idx),)*)
             }
         }
 
-        unsafe impl<$($typ_param: SafeFragment<$input_param>, $input_param: FragmentValue,)*> SafeFragment<($($input_param,)*)> for ($($typ_param,)*) {}
+        unsafe impl<$($typ_param: SafeFragment,)*> SafeFragment for ($($typ_param,)*) {}
     }
 }
 
@@ -389,35 +401,35 @@ macro_rules! tuple_impls {
 }
 
 tuple_impls! {
-    [A, AInput, 0]
-    [B, BInput, 1]
-    [C, CInput, 2]
-    [D, DInput, 3]
-    [E, EInput, 4]
-    [F, FInput, 5]
-    [G, GInput, 6]
-    [H, HInput, 7]
-    [I, IInput, 8]
-    [J, JInput, 9]
-    [K, KInput, 10]
-    [L, LInput, 11]
-    [M, MInput, 12]
-    [N, NInput, 13]
-    [O, OInput, 14]
-    [P, PInput, 15]
-    [Q, QInput, 16]
-    [R, RInput, 17]
-    [S, SInput, 18]
-    [T, TInput, 19]
-    [U, UInput, 20]
-    [V, VInput, 21]
-    [W, WInput, 22]
-    [X, XInput, 23]
-    [Y, YInput, 24]
-    [Z, ZInput, 25]
+    [A, 0]
+    [B, 1]
+    [C, 2]
+    [D, 3]
+    [E, 4]
+    [F, 5]
+    [G, 6]
+    [H, 7]
+    [I, 8]
+    [J, 9]
+    [K, 10]
+    [L, 11]
+    [M, 12]
+    [N, 13]
+    [O, 14]
+    [P, 15]
+    [Q, 16]
+    [R, 17]
+    [S, 18]
+    [T, 19]
+    [U, 20]
+    [V, 21]
+    [W, 22]
+    [X, 23]
+    [Y, 24]
+    [Z, 25]
 }
 
-macro_rules! pointer_fragment_impls {
+macro_rules! pointer_value_impls {
     ($([$typ_var:ident, $typ:ty])*) => {
         $(
         unsafe impl<$typ_var: ?Sized + 'static> FragmentValue for $typ
@@ -457,7 +469,7 @@ macro_rules! pointer_fragment_impls {
     }
 }
 
-pointer_fragment_impls! {
+pointer_value_impls! {
     [T, &'static T]
     [T, *const T]
     [T, *mut T]

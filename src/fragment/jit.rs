@@ -34,36 +34,33 @@ impl FragmentCompiler {
         })
     }
 
-    pub fn compile_unsafe<F: Fragment<Input>, Input: FragmentValue>(
+    pub fn compile_unsafe<F: Fragment>(
         &mut self,
         fragment: &F,
-    ) -> anyhow::Result<CompiledUnsafeFragment<Input, F::Output>> {
+    ) -> anyhow::Result<CompiledUnsafeFragment<F::Input, F::Output>> {
         self.compile_with_safety(fragment)
     }
 
-    pub fn compile<F: SafeFragment<Input>, Input: FragmentValue>(
+    pub fn compile<F: SafeFragment>(
         &mut self,
         fragment: &F,
-    ) -> anyhow::Result<CompiledSafeFragment<Input, F::Output>> {
+    ) -> anyhow::Result<CompiledSafeFragment<F::Input, F::Output>> {
         self.compile_with_safety(fragment)
     }
 
-    fn compile_with_safety<F: Fragment<Input>, Input: FragmentValue, const SAFE: bool>(
+    fn compile_with_safety<F: Fragment, const SAFE: bool>(
         &mut self,
         fragment: &F,
-    ) -> anyhow::Result<CompiledFragment<Input, F::Output, SAFE>> {
+    ) -> anyhow::Result<CompiledFragment<F::Input, F::Output, SAFE>> {
         Ok(CompiledFragment(unsafe {
             transmute(self.codegen(fragment)?)
         }))
     }
 
-    fn codegen<F: Fragment<Input>, Input: FragmentValue>(
-        &mut self,
-        fragment: &F,
-    ) -> anyhow::Result<*const u8> {
+    fn codegen<F: Fragment>(&mut self, fragment: &F) -> anyhow::Result<*const u8> {
         let (mut builder, input_address, output_address) = self.begin_codegen();
 
-        let inputs = Input::emit_load(
+        let inputs = F::Input::emit_load(
             &mut builder,
             MemFlags::trusted().with_readonly(),
             input_address,

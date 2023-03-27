@@ -6,13 +6,13 @@
 #![feature(portable_simd)]
 #![feature(ptr_metadata)]
 
-use crate::fragment::{Add, CompiledSafeFragment, Fragment, FragmentCompiler, SafeFragment};
+use crate::fragment::{add, FragmentCompiler};
 
 mod fragment;
 
 fn main() -> anyhow::Result<()> {
     let mut compiler = FragmentCompiler::new()?;
-    let f: CompiledSafeFragment<(usize, usize), usize> = compiler.compile(&Add)?;
+    let f = compiler.compile(&add::<usize>())?;
     println!("42 + 1 = {}", f.call(&(42, 1)));
     Ok(())
 }

@@ -4,24 +4,22 @@ mod ops;
 
 use cranelift_codegen::ir::{immediates::Offset32, types, Block, MemFlags, Type, Value};
 use cranelift_frontend::FunctionBuilder;
-pub use jit::{CompiledFragment, CompiledSafeFragment, CompiledUnsafeFragment, FragmentCompiler};
-pub use ops::{
-    Abs, Add, BitAnd, BitOr, BitXor, Ceil, CopySign, CountLeadingOneBits, CountLeadingZeroBits,
-    CountOneBits, CountTrailingZeroBits, Div, FMax, FMin, Floor, Max, Min, Mul, Nearest, Neg, Not,
-    Rem, ReverseBits, ReverseBytes, RotateLeft, RotateRight, Shl, Shr, Sqrt, Sub, Trunc,
-};
+pub use jit::*;
+pub use ops::*;
 
-pub unsafe trait Fragment<Input: FragmentValue> {
+pub trait Fragment {
+    type Input: FragmentValue;
+
     type Output: FragmentValue;
 
     fn emit_ir(
         &self,
         builder: &mut FunctionBuilder,
-        inputs: Input::IrValues,
+        inputs: <Self::Input as FragmentValue>::IrValues,
     ) -> <Self::Output as FragmentValue>::IrValues;
 }
 
-pub unsafe trait SafeFragment<Input: FragmentValue>: Fragment<Input> {}
+pub unsafe trait SafeFragment: Fragment {}
 
 pub unsafe trait FragmentValue: Copy + 'static {
     type IrValues: Clone;
@@ -47,7 +45,7 @@ pub unsafe trait FragmentValue: Copy + 'static {
 }
 
 pub unsafe trait PrimitiveValue:
-    Fragment<(), Output = Self> + FragmentValue<IrValues = Value>
+    SafeFragment<Input = (), Output = Self> + FragmentValue<IrValues = Value>
 {
     fn ir_type() -> Type;
 }
@@ -55,15 +53,15 @@ pub unsafe trait PrimitiveValue:
 #[derive(Clone, Copy, Debug)]
 pub struct CommonInput<A, B>(A, B);
 
-unsafe impl<A: Fragment<Input>, B: Fragment<Input>, Input: FragmentValue> Fragment<Input>
-    for CommonInput<A, B>
-{
+impl<A: Fragment, B: Fragment<Input = A::Input>> Fragment for CommonInput<A, B> {
+    type Input = A::Input;
+
     type Output = (A::Output, B::Output);
 
     fn emit_ir(
         &self,
         builder: &mut FunctionBuilder,
-        inputs: Input::IrValues,
+        inputs: <A::Input as FragmentValue>::IrValues,
     ) -> (
         <A::Output as FragmentValue>::IrValues,
         <B::Output as FragmentValue>::IrValues,
@@ -74,34 +72,27 @@ unsafe impl<A: Fragment<Input>, B: Fragment<Input>, Input: FragmentValue> Fragme
     }
 }
 
+unsafe impl<A: SafeFragment, B: SafeFragment<Input = A::Input>> SafeFragment for CommonInput<A, B> {}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Compose<A, B>(A, B);
 
-unsafe impl<A: Fragment<Input>, B: Fragment<A::Output>, Input: FragmentValue> Fragment<Input>
-    for Compose<A, B>
-{
+impl<A: Fragment, B: Fragment<Input = A::Output>> Fragment for Compose<A, B> {
+    type Input = A::Input;
+
     type Output = B::Output;
 
     fn emit_ir(
         &self,
         builder: &mut FunctionBuilder,
-        inputs: Input::IrValues,
+        inputs: <A::Input as FragmentValue>::IrValues,
     ) -> <B::Output as FragmentValue>::IrValues {
         let a = self.0.emit_ir(builder, inputs);
         self.1.emit_ir(builder, a)
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct Identity;
-
-unsafe impl<T: FragmentValue> Fragment<T> for Identity {
-    type Output = T;
-
-    fn emit_ir(&self, _builder: &mut FunctionBuilder, inputs: T::IrValues) -> T::IrValues {
-        inputs
-    }
-}
+unsafe impl<A: SafeFragment, B: SafeFragment<Input = A::Output>> SafeFragment for Compose<A, B> {}
 
 #[cfg(target_pointer_width = "32")]
 const ADDRESS_TYPE: Type = types::I32;
