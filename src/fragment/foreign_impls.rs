@@ -1,7 +1,11 @@
 use std::{
     mem::{size_of, MaybeUninit},
+    ops::Deref,
+    pin::Pin,
     ptr::Pointee,
+    rc::Rc,
     simd::{LaneCount, Simd, SimdElement, SupportedLaneCount},
+    sync::Arc,
 };
 
 use cranelift_codegen::ir::{
@@ -69,6 +73,41 @@ impl Fragment for f64 {
 }
 
 unsafe impl SafeFragment for f64 {}
+
+impl<T: Fragment + ?Sized> Fragment for &T {
+    type Input = T::Input;
+
+    type Output = T::Output;
+
+    fn emit_ir(
+        &self,
+        builder: &mut FunctionBuilder,
+        inputs: <Self::Input as FragmentValue>::IrValues,
+    ) -> <Self::Output as FragmentValue>::IrValues {
+        (*self).emit_ir(builder, inputs)
+    }
+}
+
+unsafe impl<T: SafeFragment + ?Sized> SafeFragment for &T {}
+
+impl<T: Deref> Fragment for Pin<T>
+where
+    T::Target: Fragment,
+{
+    type Input = <T::Target as Fragment>::Input;
+
+    type Output = <T::Target as Fragment>::Output;
+
+    fn emit_ir(
+        &self,
+        builder: &mut FunctionBuilder,
+        inputs: <Self::Input as FragmentValue>::IrValues,
+    ) -> <Self::Output as FragmentValue>::IrValues {
+        self.deref().emit_ir(builder, inputs)
+    }
+}
+
+unsafe impl<T: Deref> SafeFragment for Pin<T> where T::Target: SafeFragment {}
 
 impl<T: Fragment, const N: usize> Fragment for [T; N] {
     type Input = [T::Input; N];
@@ -226,6 +265,30 @@ where
         builder.ins().store(flags, values, address, offset);
     }
 }
+
+macro_rules! deref_fragment_impls {
+    ($($container:ident),* $(,)?) => {
+        $(
+        impl<T: Fragment + ?Sized> Fragment for $container<T> {
+            type Input = T::Input;
+
+            type Output = T::Output;
+
+            fn emit_ir(
+                &self,
+                builder: &mut FunctionBuilder,
+                inputs: <Self::Input as FragmentValue>::IrValues,
+            ) -> <Self::Output as FragmentValue>::IrValues {
+                self.deref().emit_ir(builder, inputs)
+            }
+        }
+
+        unsafe impl<T: SafeFragment + ?Sized> SafeFragment for $container<T> {}
+        )*
+    }
+}
+
+deref_fragment_impls!(Arc, Box, Rc);
 
 macro_rules! signed_int_fragment_impls {
     ($($typ:ty),* $(,)?) => {

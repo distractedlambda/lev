@@ -1,3 +1,4 @@
+mod control;
 mod foreign_impls;
 mod jit;
 mod ops;

@@ -5,10 +5,14 @@
 #![feature(maybe_uninit_uninit_array)]
 #![feature(portable_simd)]
 #![feature(ptr_metadata)]
+#![feature(btree_cursors)]
+#![feature(unchecked_math)]
+#![feature(int_roundings)]
 
-use crate::fragment::{add, Compose, FragmentCompiler, mul, neg};
+use crate::fragment::{add, mul, neg, Compose, FragmentCompiler};
 
 mod fragment;
+mod free_region_set;
 
 fn main() -> anyhow::Result<()> {
     let mut compiler = FragmentCompiler::new()?;

@@ -1,4 +1,5 @@
-use std::mem::{transmute, MaybeUninit};
+use std::{mem::{transmute, MaybeUninit}, ops::Deref, ptr::{null_mut, NonNull}, slice};
+use std::ops::DerefMut;
 
 use anyhow::anyhow;
 use cranelift_codegen::{
@@ -9,8 +10,117 @@ use cranelift_codegen::{
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{default_libcall_names, Module};
+use libc::{
+    mmap, pthread_jit_write_protect_np, vm_page_size, MAP_JIT, MAP_PRIVATE, PROT_EXEC, PROT_READ,
+    PROT_WRITE,
+};
+use parking_lot::Mutex;
 
-use crate::fragment::{Fragment, FragmentValue, SafeFragment, ADDRESS_TYPE};
+use crate::{
+    fragment::{Fragment, FragmentValue, SafeFragment, ADDRESS_TYPE},
+    free_region_set::FreeRegionSet,
+};
+
+static FREE_JIT_MEMORY: Mutex<FreeRegionSet<usize>> = Mutex::new(FreeRegionSet::new());
+
+#[derive(Debug)]
+struct JitMemory {
+    base: NonNull<u8>,
+    len: usize,
+}
+
+impl JitMemory {
+    pub fn alloc(len: usize) -> Self {
+        let (base, alloc_len) = 'blk: {
+            if let Some(region) = FREE_JIT_MEMORY.lock().remove_best_fit(len) {
+                let base = NonNull::new(region.start as *mut u8).unwrap();
+                let alloc_len = region.end - region.start;
+                break 'blk (base, alloc_len);
+            }
+
+            #[cfg(target_os = "macos")]
+            unsafe {
+                let min_pages = len.div_ceil(vm_page_size);
+                let alloc_len = min_pages * vm_page_size;
+                let base = mmap(
+                    null_mut(),
+                    alloc_len,
+                    PROT_READ | PROT_WRITE | PROT_EXEC,
+                    MAP_PRIVATE | MAP_JIT,
+                    -1,
+                    0,
+                );
+                let base = NonNull::new(base as *mut u8).unwrap();
+                break 'blk (base, alloc_len);
+            }
+
+            #[cfg(not(target_os = "macos"))]
+            todo!()
+        };
+
+        if len != alloc_len {
+            let base_addr = base.as_ptr() as usize;
+            FREE_JIT_MEMORY
+                .lock()
+                .insert(base_addr + len..base_addr + alloc_len);
+        }
+
+        Self { base, len }
+    }
+
+    pub unsafe fn mutate(&mut self) -> MutableJitMemory {
+        #[cfg(target_os = "macos")]
+        pthread_jit_write_protect_np(0);
+
+        MutableJitMemory(self)
+    }
+}
+
+impl Drop for JitMemory {
+    fn drop(&mut self) {
+        let base = self.base.as_ptr() as usize;
+        let region = base..base + self.len;
+        FREE_JIT_MEMORY.lock().insert(region);
+    }
+}
+
+struct MutableJitMemory<'a>(&'a mut JitMemory);
+
+impl<'a> Deref for MutableJitMemory<'a> {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        unsafe {
+            slice::from_raw_parts(self.0.base.as_ptr(), self.0.len)
+        }
+    }
+}
+
+impl<'a> DerefMut for MutableJitMemory<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe {
+            slice::from_raw_parts_mut(self.0.base.as_ptr())
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+extern "C" {
+    fn sys_icache_invalidate(start: *mut u8, len: usize);
+}
+
+impl<'a> Drop for MutableJitMemory<'a> {
+    fn drop(&mut self) {
+        #[cfg(target_os = "macos")]
+        unsafe {
+            pthread_jit_write_protect_np(1);
+            sys_icache_invalidate(self.0.base.as_ptr(), self.0.len);
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        todo!()
+    }
+}
 
 pub struct FragmentCompiler {
     module: JITModule,
